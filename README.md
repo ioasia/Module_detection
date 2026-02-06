@@ -8,6 +8,6 @@ Code to run module detection from the proteomics data including:
 So far, the code execution order is: 1) ALL2_cor_network_analysis.R, 2) ALL2_run_landscapes.py, 3) ALL2_basins.R.
 
 ## To do
-- Stich code together to create a workflow
+- Stitch code together to create a workflow
 - Add basin visualization part
 

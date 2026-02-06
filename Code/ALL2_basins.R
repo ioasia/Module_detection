@@ -30,18 +30,19 @@ library(rgexf)
 library(patchwork)
 
 
-path_file <- '~/Downloads/ALL2_cell_line_proj/data/'
-path_save <- '~/Downloads/ALL2_cell_line_proj/code/figures/'
+path_file <- '~/GitHub/Module_detection/Data/'
+path_big_file <- '~/Library/CloudStorage/OneDrive-KarolinskaInstitutet/Ioannis Siavelis files - Protein_landscape/ALL_cell_lines/'
+path_save <- '~/GitHub/Module_detection/Figures/'
 
 # Data
 net <- read.delim(paste0(path_file, 'ALL_cell_line_merged_igraph_predictions_sig.txt'), sep = '\t')
-proteomics_quant <- read.delim(paste0(path_file, 'ALL_cell_line_proteomics_median_centered.txt'), sep = '\t', row.names = 1)
+proteomics_quant <- read.delim(paste0(path_big_file, 'ALL_cell_line_proteomics_median_centered.txt'), sep = '\t', row.names = 1)
 proteomics_meta <- read.delim(paste0(path_file, 'ALL_cell_line_meta_data_init.txt'),  sep = '\t')
 
 # Basin of attraction
 pd <- import("pandas")
-pickle_data_neg <- pd$read_pickle(paste0(path_file, "ALL2_sign_change_condition.pkl"))
-pickle_data_pos <- pd$read_pickle(paste0(path_file, "ALL2_sign_change_condition_negated.pkl"))
+pickle_data_neg <- pd$read_pickle(paste0(path_file, "ALL2_sign_change_condition_basins.pkl"))
+pickle_data_pos <- pd$read_pickle(paste0(path_file, "ALL2_sign_change_condition_negated_basins.pkl"))
 
 get.basins <- function(sampleIDs, pickle_dat, basin_length_thres_low, basin_length_thres_high, sign_level) {
   

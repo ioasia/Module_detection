@@ -1,18 +1,19 @@
 ### ALL cell line network reconstruction
 
 ## Libraries
-source('~/Downloads/ALL2_cell_line_proj/code/exploratory/classifier_functions.R')
+source('~/GitHub/Module_detection/Code/ALL2_classifier_functions.R')
 library(Biobase)
 library(data.table)
 library(Hmisc)
 library(openxlsx)
 
 
-path_file <- '~/Downloads/ALL2_cell_line_proj/data/'
-path_save <- '~/Downloads/ALL2_cell_line_proj/code/figures/'
+path_file <- '~/GitHub/Module_detection/Data/'
+path_big_file <- '~/Library/CloudStorage/OneDrive-KarolinskaInstitutet/Ioannis Siavelis files - Protein_landscape/ALL_cell_lines/'
+path_save <- '~/GitHub/Module_detection/Figures/'
 
 # Data
-proteomics_quant <- read.delim(paste0(path_file, 'ALL_cell_line_proteomics_median_centered.txt'), sep = '\t')
+proteomics_quant <- read.delim(paste0(path_big_file, 'ALL_cell_line_proteomics_median_centered.txt'), sep = '\t')
 idxtokeep <- apply(proteomics_quant, 1, function(i) sum(!is.na(i)) >= 0.7 * ncol(proteomics_quant))
 proteomics_quant_sub <- proteomics_quant[idxtokeep, ]
 boxplot(proteomics_quant_sub)
