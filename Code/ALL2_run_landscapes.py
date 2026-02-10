@@ -9,6 +9,18 @@ import statistics
 import random
 from tqdm import tqdm
 import time
+import argparse
+
+parser = argparse.ArgumentParser()
+parser.add_argument(
+    "--no-negate",
+    action="store_true",
+    help="Use data without negation"
+)
+
+args = parser.parse_args()
+
+negate = not args.no_negate
 
 df = pd.read_csv('~/GitHub/Module_detection/Data/ALL_cell_line_merged_igraph_predictions_sig.txt', sep='\t')    
 edges = df[['Protein1', 'Protein2']]# probably not needed, but nice to have dataframe with only edges
@@ -44,7 +56,7 @@ for sample in tqdm(samples):
     proteomics_quant_sample = proteomics_quant[sample].dropna()
 
     
-    func = -proteomics_quant_sample #option to take negative
+    func = -proteomics_quant_sample if negate else proteomics_quant_sample
     func = func.to_dict()
     
     # find non-degenerate critical nodes and attraction basins
