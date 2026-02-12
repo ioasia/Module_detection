@@ -257,40 +257,79 @@ basin_sets <- lapply(all_samples_basins_list, function(df) unique(df$basin))
 sample_names <- names(basin_sets)
 n <- length(sample_names)
 
+# Calculate profiles
+basins_profiles <- do.call(rbind, lapply(basins_sets, function(i) {
+  
+  res <- proteomics_quant[i, ]
+  
+  as.numeric(apply(res, 2, median, na.rm = TRUE))
+}))
+colnames(basins_profiles) <- colnames(proteomics_quant)
+
+basins_profiles_cor <- cor(t(basins_profiles), method = 'pearson', use = 'pairwise.complete.obs')
+row_clust <- hclust(as.dist(1- basins_profiles_cor), method = 'ward.D2')
+
+ht_module_cor <- Heatmap(basins_profiles_cor, 
+                         col = colorRamp2(breaks = c(-1,0, 1), colors = c('blue', 'white', 'red')),
+                         show_column_names = FALSE,
+                         show_row_names = FALSE,
+                         cluster_columns = row_clust,
+                         cluster_rows = row_clust,
+                         show_row_dend = TRUE,
+                         column_gap = unit(3, "mm"),
+                         border = TRUE, 
+                         column_title = paste0('ALL cell lines cohort (n_modules = ', nrow(basins_profiles_cor), ')'),
+                         heatmap_legend_param = list(title = 'Peason cor.'),
+                         column_title_side = "top",
+                         column_title_gp = gpar(cex = 2, fontface = "bold"),
+                         # row_title_rot = 0,
+                         column_names_side = "top",
+                         row_dend_width = unit(2, "cm"),
+                         column_dend_height = unit(3, "cm"),
+                         row_names_gp = gpar(fontsize = 12, col = 'black'),
+                         column_names_gp = gpar(fontsize = 12, col = 'black'))
+pdf(file = paste0(path_save, 'ALL_cell_line_heatmap_critical_node_comb_non_outliers.pdf'), width = 10, 
+    height = 8)
+draw(ht_module_cor, padding = unit(c(2, 20, 2, 2), "mm"))
+dev.off()
+
+
 # Step 2: Initialize an empty matrix to store Jaccard similarities
 all_samples_overlap <- matrix(NA, nrow = n, ncol = n,
                               dimnames = list(sample_names, sample_names))
 
 # Step 3: Compute pairwise Jaccard similarities
 for (i in seq_len(n)) {
-  for (j in seq(i, n)) {  # Only compute upper triangle (symmetry)
-    set_i <- basin_sets[[i]]
-    set_j <- basin_sets[[j]]
+  for (j in seq_len(n)) {  # Only compute upper triangle (symmetry)
+    set_i <- basins_sets[[i]]
+    set_j <- basins_sets[[j]]
     
     intersection_size <- length(intersect(set_i, set_j))
-    union_size <- length(union(set_i, set_j))
+    union_size <- length(set_i)
     
     jaccard <- if (union_size == 0) 0 else intersection_size / union_size
     all_samples_overlap[i, j] <- jaccard
-    all_samples_overlap[j, i] <- jaccard  # Fill symmetric entry
   }
 }
-write.table(all_samples_overlap, paste0(path_file, 'ALL_cell_line_basin_overlap_non_outliers.txt'), sep = '\t')
 
-ht_overlap <- Heatmap(all_samples_overlap, col = colorRamp2(breaks = c(0, 1), colors = c('white', 'red')),
+
+module_order <- row_clust$labels[row_clust$order]
+
+ht_overlap <- Heatmap(all_samples_overlap[module_order, module_order], 
+                      col = colorRamp2(breaks = c(0, 1), colors = c('white', 'red')),
                       show_column_names = FALSE,
                       show_row_names = FALSE,
-                      cluster_columns = TRUE,
-                      cluster_rows = TRUE,
+                      cluster_columns = FALSE,
+                      cluster_rows = FALSE,
                       clustering_distance_rows = 'euclidean',
                       clustering_method_rows = 'ward.D2',
                       clustering_distance_columns = 'euclidean',
                       clustering_method_columns = 'ward.D2',
-                      show_row_dend = TRUE,
+                      show_row_dend = FALSE,
                       column_gap = unit(3, "mm"),
                       border = TRUE, 
                       column_title = paste0('ALL cell lines cohort (n_modules = ', nrow(all_samples_overlap), ')'),
-                      heatmap_legend_param = list(title = 'Jaccard index'),
+                      heatmap_legend_param = list(title = 'Inclusion index'),
                       column_title_side = "top",
                       column_title_gp = gpar(cex = 2, fontface = "bold"),
                       # row_title_rot = 0,
@@ -304,112 +343,34 @@ pdf(file = paste0(path_save, 'ALL_cell_line_heatmap_critical_node_comb_overlap_n
     height = 8)
 draw(ht_overlap, padding = unit(c(2, 20, 2, 2), "mm"))
 dev.off()
+
+write.table(all_samples_overlap[module_order, module_order], paste0(path_file, 'ALL_cell_line_basin_overlap_non_outliers.txt'), sep = '\t')
 ##################################################################################################################################################################
 all_samples_overlap <- read.delim(paste0(path_file, 'ALL_cell_line_basin_overlap_non_outliers.txt'), sep = '\t', check.names = FALSE)
+all_samples_overlap <- reshape2::melt(all_samples_overlap)
+all_samples_overlap <- all_samples_overlap[as.character(all_samples_overlap$Var1) > as.character(all_samples_overlap$Var2), ]
+all_samples_overlap <- all_samples_overlap[all_samples_overlap$value >= 0.5, ]
+all_samples_overlap$cor <- sapply(1:nrow(all_samples_overlap), function(i) basins_profiles_cor[as.character(all_samples_overlap$Var1)[i], as.character(all_samples_overlap$Var2)[i]])
+all_samples_overlap <- all_samples_overlap[all_samples_overlap$cor >= 0.8, ]
 
-## Pairwise 
-merge.basins <- function(basins_list, overlap_matrix, jac_thres, level = 0) {
+# Maximum cliques
+graph_overlap <- graph_from_data_frame(all_samples_overlap)
+graph_max_cliques <- max_cliques(graph_overlap)
+
+graph_max_dt <- do.call(rbind, lapply(graph_max_cliques, function(i) {
   
-  
-  repeat {
-    
-    # Get edges above threshold
-    sig_pairs <- which(overlap_matrix >= jac_thres, arr.ind = TRUE)
-    sig_pairs <- sig_pairs[sig_pairs[, 1] < sig_pairs[, 2], , drop = FALSE]  # avoid duplicates
-    
-    if (nrow(sig_pairs) == 0) break
-    
-    level <- level + 1
-    cat("Iteration:", level, "- merging basins\n")
-    
-    edges_df <- data.frame(
-      from = rownames(overlap_matrix)[sig_pairs[, 1]],
-      to = rownames(overlap_matrix)[sig_pairs[, 2]]
-    )
-    
-    ## Add size 
-    # edges_df$basin_size1 <- sapply(edges_df$from, function(i) nrow(basins_list[[i]]))
-    # edges_df$basin_size2 <- sapply(edges_df$to, function(i) nrow(basins_list[[i]]))
-    edges_df$jacc <- sapply(1:nrow(edges_df), function(k) overlap_matrix[ edges_df$from[k], edges_df$to[k] ])
-    edges_df <- edges_df[order(edges_df$jacc, decreasing = TRUE), ]
-    
-    edge_unique <- unique(c(edges_df$from, edges_df$to))
-    
-    edge_unique_size <- sapply(edge_unique, function(i) nrow(basins_list[[i]]))
-    idx_size <- order(edge_unique_size, decreasing = TRUE)
-    edge_unique_iter <- edge_unique[idx_size]
-    
-    merged_df_all <- list()
-    toremove <- c()
-    
-    while(length(edge_unique_iter) > 0 ) {
-      
-      # print(length(edge_unique_iter))
-      edges_df_sub <- head(edges_df[edges_df$from %in% edge_unique_iter[1] | edges_df$to %in% edge_unique_iter[1], ],1)
-      
-      if(nrow(edges_df_sub) == 0) {
-        edge_unique_iter <- setdiff(edge_unique_iter, edge_unique_iter[1])
-        next
-      }
-      
-      merged_df <- do.call(rbind, basins_list[c(edges_df_sub$from, edges_df_sub$to)])
-      unique_critical <- unlist(lapply(strsplit(unique(merged_df$critical), ';'), function(k) gsub('_.*', '', k)))
-      unique_samples <- unique(merged_df$sample)
-      
-      merged_df <- merged_df[!duplicated(merged_df$basin), ]
-      # merged_name <- paste0("clique_", length(edge_unique_iter), "_", level)
-      merged_name <- paste(paste(unique_critical, unique_samples, sep = '_'), collapse = '_')
-      merged_df$critical <- merged_name
-      merged_df <- list(merged_df)
-      names(merged_df) <- merged_name
-      merged_df_all <- c(merged_df_all, merged_df)
-      
-      edges_df <-  edges_df[!(edges_df$from[1] %in% edges_df_sub[, 1:2] | edges_df$to %in%edges_df_sub[, 1:2]), ]
-      edge_unique_iter <- setdiff(edge_unique_iter, edge_unique_iter[[1]])
-      toremove <- c(toremove, edges_df_sub$from, edges_df_sub$to)
-    }
-    
-    
-    # Update basins list
-    basins_list <- c(merged_df_all, basins_list[!names(basins_list) %in% toremove])
-    basin_sets <- lapply(basins_list, function(df) unique(df$basin))
-    
-    # Efficiently update overlap matrix
-    new_names <- names(basins_list)
-    new_n <- length(new_names)
-    new_matrix <- matrix(0, nrow = new_n, ncol = new_n, dimnames = list(new_names, new_names))
-    unchanged <- setdiff(new_names, names(merged_df_all))
-    
-    # Reuse existing overlaps
-    if (exists("overlap_matrix")) {
-      common <- intersect(unchanged, rownames(overlap_matrix))
-      # new_matrix[common, common] <- overlap_matrix[common, common]
-      new_matrix[common, common] <- 0
-    }
-    
-    # Recompute only necessary overlaps
-    for (i in names(merged_df_all)) {
-      # i = 'clique_10041_1'
-      # print(i)
-      set_i <- basin_sets[[i]]
-      # for (j in new_names) {
-      for( j in c(names(merged_df_all), setdiff(edge_unique, toremove))) {
-        # j = 'clique_10043_1'
-        if (i == j) next
-        set_j <- basin_sets[[j]]
-        jac <- if (length(union(set_i, set_j)) == 0) 0 else length(intersect(set_i, set_j)) / length(union(set_i, set_j))
-        new_matrix[i, j] <- jac
-        new_matrix[j, i] <- jac
-      }
-    }
-    overlap_matrix <- new_matrix
-  }
-  return(basins_list)
-}
+  basin_len <- sapply(basins_sets[names(i)], length)
+  basin_min <- names(which.min(basin_len))
+  data.frame('tokeep' = basin_min, 
+             'todiscard' = setdiff(names(basin_len), basin_min))
+}))
+
+tokeep_all <- unique(graph_max_dt$tokeep)
+todiscard_all <- unique(graph_max_dt$todiscard)
+todiscard_all <- setdiff(todiscard_all, tokeep_all)
 
 
-
-merged_basins_list <- merge.basins(basins_list = all_samples_basins_list, overlap_matrix = all_samples_overlap, jac_thres = 0.7, level = 0)
+merged_basins_list <- all_samples_basins_list[!names(all_samples_basins_list) %in% todiscard_all]
 save(merged_basins_list, file = paste0(path_file, 'ALL_cell_line_merged_basin_list_non_outliers'))
 saveRDS(merged_basins_list, file = paste0(path_file, 'ALL_cell_line_merged_basin_list_non_outliers.RDS'))
 ##################################################################################################################################################################
@@ -435,32 +396,6 @@ unique_basins_profiles <- do.call(rbind, lapply(unique_basins_list, function(i) 
   as.numeric(apply(res, 2, median, na.rm = TRUE))
 }))
 colnames(unique_basins_profiles) <- colnames(proteomics_quant)
-
-basins_profiles_cor <- cor(t(unique_basins_profiles), method = 'pearson', use = 'pairwise.complete.obs')
-
-row_clust <- hclust(as.dist(1- basins_profiles_cor), method = 'ward.D2')
-ht_module_cor <- Heatmap(basins_profiles_cor, col = colorRamp2(breaks = c(-1,0, 1), colors = c('blue', 'white', 'red')),
-                         show_column_names = FALSE,
-                         show_row_names = FALSE,
-                         cluster_columns = row_clust,
-                         cluster_rows = row_clust,
-                         show_row_dend = TRUE,
-                         column_gap = unit(3, "mm"),
-                         border = TRUE, 
-                         column_title = paste0('ALL cell lines cohort (n_modules = ', nrow(basins_profiles_cor), ')'),
-                         heatmap_legend_param = list(title = 'Peason cor.'),
-                         column_title_side = "top",
-                         column_title_gp = gpar(cex = 2, fontface = "bold"),
-                         # row_title_rot = 0,
-                         column_names_side = "top",
-                         row_dend_width = unit(2, "cm"),
-                         column_dend_height = unit(3, "cm"),
-                         row_names_gp = gpar(fontsize = 12, col = 'black'),
-                         column_names_gp = gpar(fontsize = 12, col = 'black'))
-pdf(file = paste0(path_save, 'ALL_cell_line_heatmap_critical_node_comb_non_outliers.pdf'), width = 10, 
-    height = 8)
-draw(ht_module_cor, padding = unit(c(2, 20, 2, 2), "mm"))
-dev.off()
 
 write.table(unique_basins_profiles, paste0(path_file, 'ALL_cell_line_module_median_abund_non_outliers.txt'), sep = '\t')
 ##################################################################################################################################################################
@@ -560,14 +495,26 @@ scaled_profiles <- t(scale(t(unique_basins_profiles)))
 # scaled_profiles <- unique_basins_profiles
 
 top_scores <- do.call(rbind, lapply(1:nrow(scaled_profiles), function(i) {
-
+  
   val <- as.numeric(scaled_profiles[i, ])
   
   dt <- data.frame(scale(H), val = val)
-
-  res <- lm(val ~ ., data = dt)
-  sum_dt <- summary(res)
-  sum_dt$coefficients[, 't value'][-1]
+  
+  # res_mult <- lm(val ~ ., data = dt)
+  # sum_dt_mult <- summary(res_mult)
+  # mult_var <- sum_dt_mult$coefficients[, 't value'][-1]
+  # 
+  res_uni_all <- sapply(1:6, function(j) {
+    
+    res_uni <- lm(val ~ dt[[j]])
+    sum_dt_uni <- summary(res_uni)
+    uni_var <- sum_dt_uni$coefficients[, 't value'][-1]
+    
+  })
+  
+  # c(mult_var,
+  res_uni_all
+  # )
 }))
 rownames(top_scores) <- rownames(unique_basins_profiles)
 colnames(top_scores) <- paste0('NMF', 1:K)
@@ -577,8 +524,11 @@ write.table(top_scores, paste0(path_file, 'ALL_cell_line_nmf_modules_scores_non_
 
 
 top_score_mods <- apply(top_scores, 2, function(k) {
-  sorted_mods <- rownames(top_scores)[order(k, decreasing = TRUE)]
-  c(head(sorted_mods, 5), tail(sorted_mods, 5))
+  k_idx <- which(abs(k) > 2)
+  k_sub <- k[k_idx]
+  modules_sub <- rownames(top_scores)[k_idx]
+  sorted_mods <- modules_sub[order(k_sub, decreasing = TRUE)]
+  # c(head(sorted_mods, 5), tail(sorted_mods, 5))
 })
 
 
@@ -616,310 +566,159 @@ top.scores.cor <- function(top_score_mods) {
   res_all
 }
 
-top_scores_cor <- top.scores.cor(top_score_mods = top_score_mods)
+# top_scores_cor <- top.scores.cor(top_score_mods = top_score_mods)
 top_score_mods_order <- reshape2::melt(top_score_mods)
-top_score_mods_high <- as.character(apply(top_score_mods, 2, function(i) i[1:5]))
+# top_score_mods_high <- as.character(apply(top_score_mods, 2, function(i) i[1:5]))
 
-# Enrichment analysis
-msig_cp <- GSA.read.gmt(paste0(path_file, 'c2.cp.reactome.v2025.1.Hs.symbols.gmt.txt'))
-msig_cp_list <- msig_cp$genesets
-names(msig_cp_list) <- msig_cp$geneset.names
-msig_cp_list <- reshape2::melt(msig_cp_list)
-colnames(msig_cp_list) <- c('gene', 'name')
-msig_cp_list <- msig_cp_list[, c('name', 'gene')]
-
-
-module_enrichment <- do.call(rbind, lapply(as.character(top_score_mods), function(i) {
-  
-  # i = 'DNTT_FORALL_063'
-  # print(i)
-  
-  basin_genes <- unique_basins_list[[i]]
-  
-  enrich_res <- enricher(gene =  basin_genes,
-                  pvalueCutoff = 0.01,
-                  pAdjustMethod = "BH",
-                  universe = rownames(proteomics_quant),
-                  minGSSize = 3,
-                  maxGSSize = max(basin_length),
-                  qvalueCutoff = 0.01,
-                  TERM2GENE = msig_cp_list,
-                  TERM2NAME = NA)
-  
-  enrich_res <- as.data.frame(enrich_res)
-  enrich_res <- enrich_res[which(enrich_res$Count>=3), ]
-  
-  if(nrow(enrich_res) == 0) {
-    enrich_res[1, ] = NA
-    enrich_res$cluster <- 1
-    enrich_res$Module <- i
-    enrich_res$NMF <- top_score_mods_order$Var2[match(i, top_score_mods_order$value)]
-    enrich_res$dir <- ifelse(i %in% top_score_mods_high, 'high', 'low')
-    
-    # write.table(enrich_res,  paste0(path_file,'ALL_cell_line_module_enrich_', i, '.txt'), sep = '\t')
-    return(NULL)
-  }
-  
-  if(nrow(enrich_res) == 1) {
-    enrich_res$cluster <- 1
-    enrich_res$Module <- i
-    enrich_res$NMF <- top_score_mods_order$Var2[match(i, top_score_mods_order$value)]
-    enrich_res$dir <- ifelse(i %in% top_score_mods_high, 'high', 'low')
-    
-    # write.table(enrich_res,  paste0(path_file,'ALL_cell_line_module_enrich_', i, '.txt'), sep = '\t')
-    return(enrich_res)
-  }
-
-  
-  # Ontology terms similarity matrix
-  enrich_res_sig <- enrich_res
-  enrich_res_sig_genes <- strsplit(enrich_res_sig$geneID, '\\/')
-  names(enrich_res_sig_genes) <- enrich_res_sig$ID
-  
-  pairwise_overlap_terms <- sapply(enrich_res_sig_genes, function(i) {
-    sapply(enrich_res_sig_genes, function(j) {
-      # length(intersect(i,j))/length(union(i,j))
-      length(intersect(i,j))/min(length(i), length(j))
-    })
-  })
-
-  
-  # Convert similarity matrix to a long-format data frame
-  pairwise_overlap_terms <- reshape2::melt(pairwise_overlap_terms)
-  
-  # Remove self-comparisons (term vs itself)
-  pairwise_overlap_terms <- pairwise_overlap_terms[pairwise_overlap_terms$Var1 != pairwise_overlap_terms$Var2, ]
-  
-  # Keep only unique term pairs (avoid duplicates like A–B and B–A)
-  pairwise_overlap_terms <- pairwise_overlap_terms[as.character(pairwise_overlap_terms$Var1) > 
-                                                     as.character(pairwise_overlap_terms$Var2), ]
-  
-  # Filter to retain only edges with strong similarity (> 0.5)
-  pairwise_overlap_terms_sig <- pairwise_overlap_terms[pairwise_overlap_terms$value > 0.5, ]
-  
-  
-  # Build an undirected graph where nodes = terms, edges = overlap relationships
-  enrich_g <- graph_from_data_frame(pairwise_overlap_terms_sig, directed = FALSE)
-  
-  # Identify terms not connected to others (no edge > 0.5)
-  isolated_terms <- setdiff(names(enrich_res_sig_genes), names(V(enrich_g)))
-  
-  # Add these isolated terms as standalone nodes
-  enrich_g <- add_vertices(enrich_g, 
-                           nv = length(isolated_terms), 
-                           name = isolated_terms)
-  
-  # Assign node size based on the number of genes associated with each term
-  V(enrich_g)$size <- enrich_res$Count[match(V(enrich_g)$name, enrich_res$ID)]
-  
-  
-  
-  # Detect functional clusters using the Louvain community detection algorithm
-  term_cluster <- cluster_louvain(enrich_g)
-  
-  # Assign cluster labels (C1, C2, etc.) to nodes for color-coding in the plot
-  V(enrich_g)$Cluster <- paste0('C', membership(term_cluster)[names(V(enrich_g))])
-  
-  # Visualize
-  group_map <- data.frame('name' = names(V(enrich_g)), 
-                          'cluster' = V(enrich_g)$Cluster)
-  group_map$FoldEnrichment <- enrich_res_sig$FoldEnrichment[match(group_map$name, enrich_res_sig$ID)]
-  
-  top_terms <- group_map %>%
-    group_by(cluster) %>%
-    arrange(desc(abs(FoldEnrichment))) %>%
-    slice(1) %>%
-    ungroup()
-  
-  top_terms$padj <-  enrich_res_sig$p.adjust[match(top_terms$name, enrich_res_sig$ID)]
-  top_terms$genes <- enrich_res_sig$geneID[match(top_terms$name, enrich_res_sig$ID)]
-  top_terms$size <- enrich_res_sig$Count[match(top_terms$name, enrich_res_sig$ID)]
-  top_terms$name <- factor(top_terms$name, levels = top_terms$name[order(top_terms$FoldEnrichment)])
-  top_terms <- top_terms[order(top_terms$name), ]
-
-  
-  enrich_res_sig$cluster <- membership(term_cluster)[enrich_res_sig$ID]
-  enrich_res_sig <- enrich_res_sig[order(enrich_res_sig$cluster, -enrich_res_sig$FoldEnrichment), ]
-  enrich_res_sig$Module <- i
-  enrich_res_sig$NMF <- top_score_mods_order$Var2[match(i, top_score_mods_order$value)]
-  enrich_res_sig$dir <- ifelse(i %in% top_score_mods_high, 'high', 'low')
-  
-  
-  return(enrich_res_sig)
-
-  
-  }))
-
-# Choose one representative
-module_enrichment_grouped <- module_enrichment %>% group_by(NMF, Module, cluster, dir) %>%
-  slice(1) 
-module_enrichment_grouped$Module <- factor(module_enrichment_grouped$Module, levels = unique(as.character(top_score_mods)))
-module_enrichment_grouped$ID <- factor(module_enrichment_grouped$ID, levels = unique(module_enrichment_grouped$ID[order(module_enrichment_grouped$Module)]))
-
-plot_enrich <- ggplot(module_enrichment_grouped, mapping = aes(x = Module, y = ID)) + 
-         geom_tile(aes(fill = dir)) + 
-  facet_grid(.~NMF, scale = 'free', space = 'free') + 
-  theme_bw() + 
-  theme(axis.text.x = element_text(hjust = 1, angle = 45)) + 
-  guides(fill = guide_legend(title = ''))
-
-
-pdf(paste0(path_save, 'ALL_cell_line_top_modules_enrichment.pdf'), width = 18, height = 15)
-plot(plot_enrich)
-dev.off()
-
-
-write.table(module_enrichment, paste0(path_file, 'ALL_cell_line_top_score_module_enrichment.txt'), sep = '\t', row.names = FALSE)
-write.table(top_scores_cor, paste0(path_file, 'ALL_cell_line_top_score_cor_non_outliers.txt'), sep = '\t', row.names = FALSE)
 ################################################################################################################################
-# Build graph with median abundance
-lapply(colnames(top_score_mods), function(nmf) {
-  
-  top_scores_cor_sub <- top_scores_cor[top_scores_cor$cluster == nmf, ]
-  
-  # Build edge list with aesthetics included
-  edges <- top_scores_cor_sub %>%
-    select(Var1, Var2, value, spec) %>%
-    mutate(
-      edge_color = ifelse(value > 0.5, "positive", ifelse(value < -0.5, "negative", 'else')),
-      edge_width =  as.numeric(spec))
-  
-  # Build node list
-  nodes1 <- top_scores_cor_sub %>%
-    select(name = Var1, med_abnd = abnd1, n_genes = n_genes1) %>%
-    mutate(across(c(med_abnd, n_genes), as.numeric))
-  nodes2 <- top_scores_cor_sub %>%
-    select(name = Var2, med_abnd = abnd2, n_genes = n_genes2) %>%
-    mutate(across(c(med_abnd, n_genes), as.numeric))
-  
-  nodes <- bind_rows(nodes1, nodes2) %>%
-    group_by(name) %>%
-    summarise(
-      med_abnd = mean(med_abnd, na.rm = TRUE),
-      n_genes = mean(n_genes, na.rm = TRUE),
-      .groups = "drop"
-    )
-  
-  # Build igraph
-  g <- graph_from_data_frame(d = edges, vertices = nodes, directed = FALSE)
-  E(g)$weight <- ifelse(E(g)$edge_color == "positive", 2, 0.5)
-  g_filtered <- delete_edges(g, which(E(g)$edge_color == "else"))
-  
-  set.seed(123)  # ensures reproducibility
-  layout_coords <- layout_with_fr(g_filtered, weights = E(g_filtered)$weight)
-  
-  # Plot
-  graph_sub <- ggraph(g_filtered, layout =layout_coords) +
-    geom_edge_link(aes(width = edge_width, color = edge_color)) +
-    geom_node_point(aes(color = med_abnd, size = n_genes), alpha = 1) +
-    scale_edge_color_manual(breaks =  c("positive", "negative"), values = c("positive" = "red", "negative" = "blue"), 
-                            labels = c('> 0.5', '< -0.5')) +
-    scale_color_gradient2(low = "blue", mid = 0, high = "red") +
-    scale_edge_width(range = c(0.1, 1)) +
-    scale_size_continuous(range = c(3, 10)) + 
-    geom_label_repel(aes(label = name, x = x, y = y), 
-                     size = 3, 
-                     color = "black", 
-                     box.padding = 0.35, 
-                     point.padding = 0.5,
-                     min.segment.length = 0.1,
-                     segment.color = "black") +
-    labs(title = nmf) + 
-    theme_void() +
-    theme(plot.title = element_text(hjust = 0.5), legend.position = "right") +
-    guides(edge_width = "none", 
-           edge_color = guide_legend(order = 1), 
-           color = guide_colorbar(order = 2),
-           size = guide_legend(order = 3))
-  
-  
-  pdf(paste0(path_save, 'ALL_cell_line_top_modules_',nmf, '.pdf'), width = 6, height = 6)
-  plot(graph_sub)
-  dev.off()
-  
-})  
-
-
-# Sample specific
-nmf.net.abnd <- function(sample_id, top_scores_cor, unique_basins_profiles) {
-  
-  # lapply(names(nmf_cluster), function(sample_id) {
-  
-  # print(sample_id)
-  nmf <- paste0('NMF', as.character(nmf_clusters[sample_id]))
-  
-  top_scores_cor_sub <- top_scores_cor[top_scores_cor$cluster == nmf, ]
-  nmf_mods <- union(top_scores_cor_sub$Var1, top_scores_cor_sub$Var2)
-  
-  # Build edge list with aesthetics included
-  edges <- top_scores_cor_sub %>%
-    select(Var1, Var2, value, spec) %>%
-    mutate(
-      edge_color = ifelse(value > 0.5, "positive", ifelse(value < -0.5, "negative", 'else')),
-      edge_width =  as.numeric(spec))
-  
-  top_scores_cor_sub$abnd1 <- unique_basins_profiles[as.character(top_scores_cor_sub$Var1), sample_id]
-  top_scores_cor_sub$abnd2 <- unique_basins_profiles[as.character(top_scores_cor_sub$Var2), sample_id]
-  
-  # Build node list
-  nodes1 <- top_scores_cor_sub %>%
-    select(name = Var1, med_abnd = abnd1, n_genes = n_genes1) %>%
-    mutate(across(c(med_abnd, n_genes), as.numeric))
-  nodes2 <- top_scores_cor_sub %>%
-    select(name = Var2, med_abnd = abnd2, n_genes = n_genes2) %>%
-    mutate(across(c(med_abnd, n_genes), as.numeric))
-  nodes <- bind_rows(nodes1, nodes2) %>%
-    group_by(name) %>%
-    summarise(
-      med_abnd = mean(med_abnd, na.rm = TRUE),
-      n_genes = mean(n_genes, na.rm = TRUE),
-      .groups = "drop"
-    )
-  
-  # Build igraph
-  g <- graph_from_data_frame(d = edges, vertices = nodes, directed = FALSE)
-  E(g)$weight <- ifelse(E(g)$edge_color == "positive", 2, 0.5)
-  g_filtered <- delete_edges(g, which(E(g)$edge_color == "else"))
-  
-  set.seed(123)  # ensures reproducibility
-  layout_coords <- layout_with_fr(g_filtered, weights = E(g_filtered)$weight)
-  
-  # Plot
-  graph_sub <- ggraph(g_filtered, layout =layout_coords) +
-    geom_edge_link(aes(width = edge_width, color = edge_color)) +
-    geom_node_point(aes(color = med_abnd, size = n_genes), alpha = 1) +
-    scale_edge_color_manual(values = c("positive" = "red", "negative" = "blue"), 
-                            labels = c('> 0.5', '< -0.5')) +
-    scale_color_gradient2(name = 'Abnd', low = "blue", mid = 0, high = "red") +
-    scale_edge_width(range = c(0.1, 1)) +
-    scale_size_continuous(range = c(3, 10)) + 
-    geom_label_repel(aes(label = name, x = x, y = y), 
-                     size = 3, 
-                     color = "black", 
-                     box.padding = 0.35, 
-                     point.padding = 0.5,
-                     min.segment.length = 0.1,
-                     segment.color = "black") +
-    labs(title = paste0(sample_id, ' - ', nmf)) + 
-    theme_void() +
-    theme(plot.title = element_text(hjust = 0.5), legend.position = "right") +
-    guides(edge_width = "none", 
-           edge_color = guide_legend(order = 1), 
-           color = guide_colorbar(order = 2),
-           size = guide_legend(order = 3))
-  
-  
-  
-}
-## Sample specific
-lapply(names(nmf_clusters), function(sample_id) {
-  
-  p <- nmf.net.abnd (sample_id = sample_id, top_scores_cor = top_scores_cor, unique_basins_profiles = unique_basins_profiles)
-  
-  pdf(paste0(path_save, 'ALL_cell_line_net_top_modules_', sample_id, '.pdf'), width = 6, height = 6)
-  plot(p)
-  dev.off()
-})
+# # Build graph with median abundance
+# lapply(colnames(top_score_mods), function(nmf) {
+#   
+#   top_scores_cor_sub <- top_scores_cor[top_scores_cor$cluster == nmf, ]
+#   
+#   # Build edge list with aesthetics included
+#   edges <- top_scores_cor_sub %>%
+#     select(Var1, Var2, value, spec) %>%
+#     mutate(
+#       edge_color = ifelse(value > 0.5, "positive", ifelse(value < -0.5, "negative", 'else')),
+#       edge_width =  as.numeric(spec))
+#   
+#   # Build node list
+#   nodes1 <- top_scores_cor_sub %>%
+#     select(name = Var1, med_abnd = abnd1, n_genes = n_genes1) %>%
+#     mutate(across(c(med_abnd, n_genes), as.numeric))
+#   nodes2 <- top_scores_cor_sub %>%
+#     select(name = Var2, med_abnd = abnd2, n_genes = n_genes2) %>%
+#     mutate(across(c(med_abnd, n_genes), as.numeric))
+#   
+#   nodes <- bind_rows(nodes1, nodes2) %>%
+#     group_by(name) %>%
+#     summarise(
+#       med_abnd = mean(med_abnd, na.rm = TRUE),
+#       n_genes = mean(n_genes, na.rm = TRUE),
+#       .groups = "drop"
+#     )
+#   
+#   # Build igraph
+#   g <- graph_from_data_frame(d = edges, vertices = nodes, directed = FALSE)
+#   E(g)$weight <- ifelse(E(g)$edge_color == "positive", 2, 0.5)
+#   g_filtered <- delete_edges(g, which(E(g)$edge_color == "else"))
+#   
+#   set.seed(123)  # ensures reproducibility
+#   layout_coords <- layout_with_fr(g_filtered, weights = E(g_filtered)$weight)
+#   
+#   # Plot
+#   graph_sub <- ggraph(g_filtered, layout =layout_coords) +
+#     geom_edge_link(aes(width = edge_width, color = edge_color)) +
+#     geom_node_point(aes(color = med_abnd, size = n_genes), alpha = 1) +
+#     scale_edge_color_manual(breaks =  c("positive", "negative"), values = c("positive" = "red", "negative" = "blue"), 
+#                             labels = c('> 0.5', '< -0.5')) +
+#     scale_color_gradient2(low = "blue", mid = 0, high = "red") +
+#     scale_edge_width(range = c(0.1, 1)) +
+#     scale_size_continuous(range = c(3, 10)) + 
+#     geom_label_repel(aes(label = name, x = x, y = y), 
+#                      size = 3, 
+#                      color = "black", 
+#                      box.padding = 0.35, 
+#                      point.padding = 0.5,
+#                      min.segment.length = 0.1,
+#                      segment.color = "black") +
+#     labs(title = nmf) + 
+#     theme_void() +
+#     theme(plot.title = element_text(hjust = 0.5), legend.position = "right") +
+#     guides(edge_width = "none", 
+#            edge_color = guide_legend(order = 1), 
+#            color = guide_colorbar(order = 2),
+#            size = guide_legend(order = 3))
+#   
+#   
+#   pdf(paste0(path_save, 'ALL_cell_line_top_modules_',nmf, '.pdf'), width = 6, height = 6)
+#   plot(graph_sub)
+#   dev.off()
+#   
+# })  
+# 
+# 
+# # Sample specific
+# nmf.net.abnd <- function(sample_id, top_scores_cor, unique_basins_profiles) {
+#   
+#   # lapply(names(nmf_cluster), function(sample_id) {
+#   
+#   # print(sample_id)
+#   nmf <- paste0('NMF', as.character(nmf_clusters[sample_id]))
+#   
+#   top_scores_cor_sub <- top_scores_cor[top_scores_cor$cluster == nmf, ]
+#   nmf_mods <- union(top_scores_cor_sub$Var1, top_scores_cor_sub$Var2)
+#   
+#   # Build edge list with aesthetics included
+#   edges <- top_scores_cor_sub %>%
+#     select(Var1, Var2, value, spec) %>%
+#     mutate(
+#       edge_color = ifelse(value > 0.5, "positive", ifelse(value < -0.5, "negative", 'else')),
+#       edge_width =  as.numeric(spec))
+#   
+#   top_scores_cor_sub$abnd1 <- unique_basins_profiles[as.character(top_scores_cor_sub$Var1), sample_id]
+#   top_scores_cor_sub$abnd2 <- unique_basins_profiles[as.character(top_scores_cor_sub$Var2), sample_id]
+#   
+#   # Build node list
+#   nodes1 <- top_scores_cor_sub %>%
+#     select(name = Var1, med_abnd = abnd1, n_genes = n_genes1) %>%
+#     mutate(across(c(med_abnd, n_genes), as.numeric))
+#   nodes2 <- top_scores_cor_sub %>%
+#     select(name = Var2, med_abnd = abnd2, n_genes = n_genes2) %>%
+#     mutate(across(c(med_abnd, n_genes), as.numeric))
+#   nodes <- bind_rows(nodes1, nodes2) %>%
+#     group_by(name) %>%
+#     summarise(
+#       med_abnd = mean(med_abnd, na.rm = TRUE),
+#       n_genes = mean(n_genes, na.rm = TRUE),
+#       .groups = "drop"
+#     )
+#   
+#   # Build igraph
+#   g <- graph_from_data_frame(d = edges, vertices = nodes, directed = FALSE)
+#   E(g)$weight <- ifelse(E(g)$edge_color == "positive", 2, 0.5)
+#   g_filtered <- delete_edges(g, which(E(g)$edge_color == "else"))
+#   
+#   set.seed(123)  # ensures reproducibility
+#   layout_coords <- layout_with_fr(g_filtered, weights = E(g_filtered)$weight)
+#   
+#   # Plot
+#   graph_sub <- ggraph(g_filtered, layout =layout_coords) +
+#     geom_edge_link(aes(width = edge_width, color = edge_color)) +
+#     geom_node_point(aes(color = med_abnd, size = n_genes), alpha = 1) +
+#     scale_edge_color_manual(values = c("positive" = "red", "negative" = "blue"), 
+#                             labels = c('> 0.5', '< -0.5')) +
+#     scale_color_gradient2(name = 'Abnd', low = "blue", mid = 0, high = "red") +
+#     scale_edge_width(range = c(0.1, 1)) +
+#     scale_size_continuous(range = c(3, 10)) + 
+#     geom_label_repel(aes(label = name, x = x, y = y), 
+#                      size = 3, 
+#                      color = "black", 
+#                      box.padding = 0.35, 
+#                      point.padding = 0.5,
+#                      min.segment.length = 0.1,
+#                      segment.color = "black") +
+#     labs(title = paste0(sample_id, ' - ', nmf)) + 
+#     theme_void() +
+#     theme(plot.title = element_text(hjust = 0.5), legend.position = "right") +
+#     guides(edge_width = "none", 
+#            edge_color = guide_legend(order = 1), 
+#            color = guide_colorbar(order = 2),
+#            size = guide_legend(order = 3))
+#   
+#   
+#   
+# }
+# ## Sample specific
+# lapply(names(nmf_clusters), function(sample_id) {
+#   
+#   p <- nmf.net.abnd (sample_id = sample_id, top_scores_cor = top_scores_cor, unique_basins_profiles = unique_basins_profiles)
+#   
+#   pdf(paste0(path_save, 'ALL_cell_line_net_top_modules_', sample_id, '.pdf'), width = 6, height = 6)
+#   plot(p)
+#   dev.off()
+# })
 
 ################################################################################################################################
 ## Complex Heatmap membership
@@ -980,5 +779,272 @@ ht_all <-  ht_memb %v% ht_prof
 pdf(file = paste0(path_save, 'ALL_cell_line_NMFs_heatmap_non_outliers.pdf'), width = 15, height = 12)
 draw(ht_all, padding = unit(c(2, 20, 2, 2), "mm"))
 dev.off()
+################################################################################################################################
+# Enrichment analysis
+msig_cp <- GSA.read.gmt(paste0(path_file, 'c2.cp.reactome.v2025.1.Hs.symbols.gmt.txt'))
+msig_cp_list <- msig_cp$genesets
+names(msig_cp_list) <- msig_cp$geneset.names
+msig_cp_list <- reshape2::melt(msig_cp_list)
+colnames(msig_cp_list) <- c('gene', 'name')
+msig_cp_list <- msig_cp_list[, c('name', 'gene')]
+
+enrich_totest <- sapply(rownames(top_scores), function(i)  length( unique_basins_sets[[i]]))
+enrich_totest <- names(enrich_totest)[enrich_totest >= 10 & enrich_totest <= 100]
+
+
+enrich_totest <- enrich_totest[apply(top_scores[enrich_totest,], 1, function(i) any(i > 2))]
+
+module_enrichment <- do.call(rbind, lapply(enrich_totest, function(i) {
+  
+  # i = 'NAXD_FORALL_154'
+  print(i)
+  
+  basin_genes <- unique_basins_sets[[i]]
+  
+  enrich_res <- enricher(gene =  basin_genes,
+                         pvalueCutoff = 0.01,
+                         pAdjustMethod = "BH",
+                         universe = rownames(proteomics_quant),
+                         minGSSize = 3,
+                         maxGSSize = max(basin_length),
+                         qvalueCutoff = 0.01,
+                         TERM2GENE = msig_cp_list,
+                         TERM2NAME = NA)
+  
+  enrich_res <- as.data.frame(enrich_res)
+  enrich_res <- enrich_res[which(enrich_res$Count>=3), ]
+  
+  if(nrow(enrich_res) == 0) {
+    enrich_res[1, ] = NA
+    enrich_res$cluster <- 1
+    enrich_res$Module <- i
+    # enrich_res$NMF <- top_score_mods_order$Var2[match(i, top_score_mods_order$value)]
+    # enrich_res$dir <- ifelse(i %in% top_score_mods_high, 'high', 'low')
+    
+    # write.table(enrich_res,  paste0(path_file,'ALL_cell_line_module_enrich_', i, '.txt'), sep = '\t')
+    return(NULL)
+  }
+  
+  if(nrow(enrich_res) == 1) {
+    enrich_res$cluster <- 1
+    enrich_res$Module <- i
+    # enrich_res$NMF <- top_score_mods_order$Var2[match(i, top_score_mods_order$value)]
+    # enrich_res$dir <- ifelse(i %in% top_score_mods_high, 'high', 'low')
+    
+    # write.table(enrich_res,  paste0(path_file,'ALL_cell_line_module_enrich_', i, '.txt'), sep = '\t')
+    return(enrich_res)
+  }
+  
+  
+  # Ontology terms similarity matrix
+  enrich_res_sig <- enrich_res
+  enrich_res_sig_genes <- strsplit(enrich_res_sig$geneID, '\\/')
+  names(enrich_res_sig_genes) <- enrich_res_sig$ID
+  
+  pairwise_overlap_terms <- sapply(enrich_res_sig_genes, function(i) {
+    sapply(enrich_res_sig_genes, function(j) {
+      # length(intersect(i,j))/length(union(i,j))
+      length(intersect(i,j))/min(length(i), length(j))
+    })
+  })
+  
+  
+  # Convert similarity matrix to a long-format data frame
+  pairwise_overlap_terms <- reshape2::melt(pairwise_overlap_terms)
+  
+  # Remove self-comparisons (term vs itself)
+  pairwise_overlap_terms <- pairwise_overlap_terms[pairwise_overlap_terms$Var1 != pairwise_overlap_terms$Var2, ]
+  
+  # Keep only unique term pairs (avoid duplicates like A–B and B–A)
+  pairwise_overlap_terms <- pairwise_overlap_terms[as.character(pairwise_overlap_terms$Var1) > 
+                                                     as.character(pairwise_overlap_terms$Var2), ]
+  
+  # Filter to retain only edges with strong similarity (> 0.5)
+  pairwise_overlap_terms_sig <- pairwise_overlap_terms[pairwise_overlap_terms$value > 0.5, ]
+  
+  
+  # Build an undirected graph where nodes = terms, edges = overlap relationships
+  enrich_g <- graph_from_data_frame(pairwise_overlap_terms_sig, directed = FALSE)
+  
+  # Identify terms not connected to others (no edge > 0.5)
+  isolated_terms <- setdiff(names(enrich_res_sig_genes), names(V(enrich_g)))
+  
+  # Add these isolated terms as standalone nodes
+  enrich_g <- add_vertices(enrich_g, 
+                           nv = length(isolated_terms), 
+                           name = isolated_terms)
+  
+  # Assign node size based on the number of genes associated with each term
+  V(enrich_g)$size <- enrich_res$Count[match(V(enrich_g)$name, enrich_res$ID)]
+  
+  
+  
+  # Detect functional clusters using the Louvain community detection algorithm
+  term_cluster <- cluster_louvain(enrich_g)
+  
+  # Assign cluster labels (C1, C2, etc.) to nodes for color-coding in the plot
+  V(enrich_g)$Cluster <- paste0('C', membership(term_cluster)[names(V(enrich_g))])
+  
+  # Visualize
+  group_map <- data.frame('name' = names(V(enrich_g)), 
+                          'cluster' = V(enrich_g)$Cluster)
+  group_map$FoldEnrichment <- enrich_res_sig$FoldEnrichment[match(group_map$name, enrich_res_sig$ID)]
+  
+  # top_terms <- group_map %>%
+  #   group_by(cluster) %>%
+  #   arrange(desc(abs(FoldEnrichment))) %>%
+  #   slice(1) %>%
+  #   ungroup()
+  
+  # top_terms$padj <-  enrich_res_sig$p.adjust[match(top_terms$name, enrich_res_sig$ID)]
+  # top_terms$genes <- enrich_res_sig$geneID[match(top_terms$name, enrich_res_sig$ID)]
+  # top_terms$size <- enrich_res_sig$Count[match(top_terms$name, enrich_res_sig$ID)]
+  # top_terms$name <- factor(top_terms$name, levels = top_terms$name[order(top_terms$FoldEnrichment)])
+  # top_terms <- top_terms[order(top_terms$name), ]
+  
+  
+  enrich_res_sig$cluster <- membership(term_cluster)[enrich_res_sig$ID]
+  enrich_res_sig <- enrich_res_sig[order(enrich_res_sig$cluster, -enrich_res_sig$FoldEnrichment), ]
+  enrich_res_sig$Module <- i
+  # enrich_res_sig$NMF <- top_score_mods_order$Var2[match(i, top_score_mods_order$value)]
+  # enrich_res_sig$dir <- ifelse(i %in% top_score_mods_high, 'high', 'low')
+  
+  
+  return(enrich_res_sig)
+  
+  
+}))
+
+write.table(module_enrichment, paste0(path_file, 'ALL_cell_line_top_score_module_enrichment.txt'), sep = '\t', row.names = FALSE)
+
+# Choose representatives
+module_enrichment_grouped <- module_enrichment %>% group_by(Module, cluster) %>%
+  slice(1) 
+
+module_enrichment_grouped[, colnames(top_scores)] <- top_scores[module_enrichment_grouped$Module, ]
+
+table(module_enrichment_grouped$Module)
+# module_enrichment_grouped_nondup <- module_enrichment_grouped[!duplicated(module_enrichment_grouped$Module), ]
+
+# top_score_mods <- apply(top_scores, 2, function(k) {
+#   sorted_mods <- rownames(top_scores)[order(k, decreasing = TRUE)]
+#   c(head(sorted_mods, 5), tail(sorted_mods, 5))
+# })
+
+top_scores_sub <- as.data.frame(top_scores[unique(module_enrichment_grouped$Module), ])
+top_score_mods <- apply(top_scores_sub, 2, function(k) {
+  k_idx <- which(abs(k) > 2)
+  k_sub <- k[k_idx]
+  modules_sub <- rownames(top_scores_sub)[k_idx]
+  sorted_mods <- modules_sub[order(k_sub, decreasing = TRUE)]
+  c(head(sorted_mods, 5), tail(sorted_mods, 5))
+})
+
+top_score_mods_order <- reshape2::melt(top_score_mods)
+
+ht_prof <- Heatmap(unique_basins_profiles[ top_score_mods_order$value, sample_order], 
+                   # col = circlize::colorRamp2(breaks = c(0,1), colors = c('white', 'red')),
+                   row_split = top_score_mods_order$Var2,
+                   column_split = h_membership[sample_order, 'class'],
+                   column_title = NULL,
+                   row_title = NULL,
+                   show_column_names = TRUE,
+                   cluster_columns = FALSE,
+                   cluster_rows = FALSE,
+                   clustering_distance_rows = 'pearson',
+                   clustering_method_rows = 'ward.D2',
+                   show_row_dend = FALSE,
+                   show_row_names = TRUE,
+                   row_gap = unit(0, "mm"),
+                   column_gap = unit(3, "mm"),
+                   border = TRUE, 
+                   heatmap_legend_param = list(title = 'log2 ratio'),
+                   column_title_side = "top",
+                   row_title_rot = 0,
+                   column_names_side = "bottom",
+                   row_names_gp = gpar(fontsize = 12, col = 'black'),
+                   height = unit(22, "cm"))
+
+
+source(paste0(path_file, 'ALL_color_palette.R'))
+ALL_color_list <- ALL_color_palette()
+heatmap_meta <- proteomics_meta[, c('Type', 'Grouped_Subtype')]
+
+ha_meta <- HeatmapAnnotation(df = heatmap_meta[sample_order, ],
+                             col = list('type' = ALL_color_list$type,
+                                        'Grouped_Subtype' = ALL_color_list$Grouped_Subtype)
+                             ,
+                             # gp = gpar(col = "black"),
+                             show_annotation_name = TRUE,
+                             na_col = 'white',
+                             border = TRUE,
+                             annotation_name_side = 'left')
+
+
+
+
+
+ht_all <-  ha_meta %v% ht_memb %v% ht_prof
+
+pdf(file = paste0(path_save, 'ALL_cell_line_NMFs_heatmap_non_outliers_enriched.pdf'), width = 32, height = 12)
+draw(ht_all, padding = unit(c(2, 20, 2, 2), "mm"))
+dev.off()
+
+
+
+module_enrichment_toplot <- top_score_mods_order
+colnames(module_enrichment_toplot) <- c('Var1', 'NMF', 'Module')
+module_enrichment_toplot <- do.call(rbind, lapply(1:nrow(module_enrichment_toplot), function(i) {
+  
+  ids <- module_enrichment_grouped$ID[module_enrichment_grouped$Module %in% module_enrichment_toplot$Module[i]]
+  cbind.data.frame(module_enrichment_toplot[i, ], 'ID' = ids)
+  
+}))
+module_enrichment_toplot$dir <- sapply(1:nrow(module_enrichment_toplot), function(i) top_scores[module_enrichment_toplot$Module[i], as.character(module_enrichment_toplot$NMF[i])])
+module_enrichment_toplot$dir <- ifelse(module_enrichment_toplot$dir > 0, 'high', 'low')
+
+module_enrichment_toplot$Module <- factor(module_enrichment_toplot$Module, levels = unique(as.character(top_score_mods)))
+module_enrichment_toplot$ID <- factor(module_enrichment_toplot$ID, levels = setdiff(unique(module_enrichment_toplot$ID[order(module_enrichment_toplot$Module)]), 'NA'))
+
+plot_enrich <- ggplot(module_enrichment_toplot, mapping = aes(x = Module, y = ID)) +
+  geom_tile(aes(fill = dir)) +
+  scale_y_discrete(na.translate = FALSE) +
+  facet_grid(.~NMF, scale = 'free', space = 'free') +
+  theme_bw() +
+  theme(axis.text.x = element_text(hjust = 1, angle = 45)) +
+  guides(fill = guide_legend(title = ''))
+
+
+pdf(paste0(path_save, 'ALL_cell_line_top_modules_enrichment.pdf'), width = 21, height = 12)
+plot(plot_enrich)
+dev.off()
+
+
+write.table(proteomics_meta, paste0(path_file, 'ALL_cell_line_meta_data_init_NMF.txt'), sep = '\t', row.names = FALSE)
+
+
+
+### Degree vs No. of modules
+freq_proteins <- as.data.frame(table(unlist(unique_basins_sets)))
+freq_proteins$Var1 <- factor(freq_proteins$Var1, levels = freq_proteins$Var1[order(freq_proteins$Freq, decreasing = TRUE)])
+freq_proteins <- freq_proteins[order(freq_proteins$Var1), ]
+
+net_graph <- graph_from_data_frame(net[, 1:2])
+node_degree <- igraph::degree(net_graph)
+
+freq_proteins$node_degree <- node_degree[as.character(freq_proteins$Var1)]
+freq_proteins$score <- freq_proteins$Freq * freq_proteins$node_degree
+freq_proteins <- freq_proteins[order(freq_proteins$score, decreasing = TRUE), ]
+
+p_degree_modules <- ggplot(freq_proteins, aes(x = node_degree, y = Freq) ) + 
+  geom_point() + 
+  geom_point(data = freq_proteins[1:50, ], color = 'red') + 
+  geom_text_repel(data = freq_proteins[1:50, ], mapping = aes(label = Var1),force = 20, min.segment.length = 0.1, size = 2, color = 'red', fontface = 'bold') + 
+  # scale_x_discrete(expand = c(0.05, 0.05, 0.01, 0.01)) + 
+  labs(x = 'node degree', y = '# modules') + 
+  theme_classic() + 
+  theme()
+
+ggsave(paste0(path_save, 'ALL_cell_lines_node_degree_no_module_cor.pdf'), plot = p_degree_modules, width = 10, height = 7)
 
 ###
