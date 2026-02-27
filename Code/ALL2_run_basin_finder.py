@@ -33,6 +33,9 @@ samples = list(proteomics_quant.columns)
 # Create an undirected graph
 G_all = nx.from_pandas_edgelist(edges, source='Protein1', target='Protein2')
 G = G_all.subgraph(proteins).copy()
+largest_cc_nodes = max(nx.connected_components(G), key=len)
+largest_cc = G.subgraph(largest_cc_nodes).copy()
+
 # Function to find neighbors with lower function values
 def sign(x):
     return (x > 0) - (x < 0)
@@ -42,15 +45,41 @@ def lower_neighbors(node, G, func):
 def lower_neighbors_same_sign(node, G, func):
     return [nbr for nbr in G.neighbors(node) if (func[nbr] < func[node]) & ((sign(func[node]) - sign(func[nbr])) == 0)]
 #             func[nbr] < func[node] & sign(func[node] == sign(func[nbr])]
-largest_cc_nodes = max(nx.connected_components(G), key=len)
-largest_cc = G.subgraph(largest_cc_nodes).copy()
 
+
+# basin finder function
+def basin_finder(G, func): #G: graph in networkx format, func: node function in dictionary format
+    G_curr = G.copy()
+    crit = {}
+    blocked = {}
+    k = 0
+    while G_curr.number_of_nodes() > 0:
+        crit_dict = {'boundary':[]}
+        blocked[k] = []
+        for prot in sorted(func, key=func.get):
+    #         print(prot)
+            if prot in G_curr.nodes:
+    #             print(prot)
+                if (len(lower_neighbors(prot, G_curr, func)) == 0):# option to restrict only to driver genes:  & (prot in driver_genes)
+                    crit_dict[prot] = [prot]
+                elif len([key for key, value_list in crit_dict.items() if set(lower_neighbors_same_sign(prot, G_curr, func)) & set(value_list)]) == 0:
+                    blocked[k].append(prot)
+                elif len([key for key, value_list in crit_dict.items() if set(lower_neighbors_same_sign(prot, G_curr, func)) & set(value_list)]) == 1:
+                    crit_dict[[key for key, value_list in crit_dict.items() if set(lower_neighbors_same_sign(prot, G_curr, func)) & set(value_list)][0]].append(prot)
+                elif len([key for key, value_list in crit_dict.items() if set(lower_neighbors_same_sign(prot, G_curr, func)) & set(value_list)]) > 1:
+                    crit_dict['boundary'].append(prot)
+        crit[k] = crit_dict     
+        k += 1
+        G_curr = G_curr.subgraph(crit_dict['boundary'])
+        print('number of nodes: ',len(G_curr.nodes()))
+        return crit, blocked
+    
 #################### run basin finder for all samples #####################
 
 # sample = samples[17]
 all_landscapes = {}
 all_blocked = {}
-all_flows = {}
+# all_flows = {}
 for sample in tqdm(samples):
     print(sample) # choose a sample
     proteomics_quant_sample = proteomics_quant[sample].dropna()
@@ -73,56 +102,31 @@ for sample in tqdm(samples):
     # Step 4. Create the graph of the largest component
     largest_subG = subG.subgraph(largest_cc_nodes).copy()
 
-
-    G_curr = largest_subG.copy()
-    crit = {}
-    blocked = {}
-    k = 0
-    flow = {}
-    while G_curr.number_of_nodes() > 0:
-        crit_dict = {}
-        flow_dict = {}
-        boundary = []
-        blocked[k] = []
-        for prot in sorted(func, key=func.get):
-    #         print(prot)
-            if prot in G_curr.nodes:
-    #             print(prot)
-                if (len(lower_neighbors(prot, G_curr, func)) == 0):# option to restrict only to driver genes:  & (prot in driver_genes)
-                    crit_dict[prot] = [prot]
-                elif len([key for key, value_list in crit_dict.items() if set(lower_neighbors_same_sign(prot, G_curr, func)) & set(value_list)]) == 0:
-                    blocked[k].append(prot)
-                elif len([key for key, value_list in crit_dict.items() if set(lower_neighbors_same_sign(prot, G_curr, func)) & set(value_list)]) == 1:
-                    crit_dict[[key for key, value_list in crit_dict.items() if set(lower_neighbors_same_sign(prot, G_curr, func)) & set(value_list)][0]].append(prot)
-                elif len([key for key, value_list in crit_dict.items() if set(lower_neighbors_same_sign(prot, G_curr, func)) & set(value_list)]) > 1:
-                    boundary.append(prot)   
-                    flow_dict[prot] = [key for key, value_list in crit_dict.items() if set(lower_neighbors_same_sign(prot, G_curr, func)) & set(value_list)]
-        crit[k] = crit_dict     
-        flow[k] = flow_dict
-        k += 1
-        G_curr = G_curr.subgraph(boundary)
-#         G_curr.remove_nodes_from([elem for lst in crit_dict.values() for elem in lst])
-        print('number of nodes: ',len(G_curr.nodes()))
+    # now find non-degenerate critical nodes and attraction basins based in individualsed graph and function
+    (crit, blocked) = basin_finder(largest_subG, func)
+    
     all_landscapes[sample] = crit
     all_blocked[sample] = blocked
-    all_flows[sample] = flow
+        
+
 # Save
 code_dir = Path(__file__).resolve().parent          # .../Module_detection/Code
 repo_dir = code_dir.parent                          # .../Module_detection
 
-outpath = repo_dir / "Data" / "ALL2_sign_change_condition_negated_basins.pkl"
+suffix = "_neg" if negate else ""
+outpath = repo_dir / "Data" / f"ALL2_sign_change_condition_negated_basins{suffix}.pkl"
 
 with open(outpath, 'wb') as f:
     pkl.dump(all_landscapes, f)
 
-outpath = repo_dir / "Data" / "ALL2_sign_change_condition_negated_blocked_prots.pkl"
+outpath = repo_dir / "Data" / f"ALL2_sign_change_condition_negated_blocked_prots{suffix}.pkl"
 
 with open(outpath, 'wb') as g: 
     pkl.dump(all_blocked, g)
 
-outpath = repo_dir / "Data" / "ALL2_sign_change_condition_negated_flows.pkl"
+# outpath = repo_dir / "Data" / "ALL2_sign_change_condition_negated_flows.pkl"
 
-with open(outpath, 'wb') as g: 
-    pkl.dump(all_flows, g)
+# with open(outpath, 'wb') as g: 
+#     pkl.dump(all_flows, g)
 
 

@@ -41,8 +41,8 @@ proteomics_meta <- read.delim(paste0(path_file, 'ALL_cell_line_meta_data_init.tx
 
 # Basin of attraction
 pd <- import("pandas")
-pickle_data_neg <- pd$read_pickle(paste0(path_file, "ALL2_sign_change_condition_basins.pkl"))
-pickle_data_pos <- pd$read_pickle(paste0(path_file, "ALL2_sign_change_condition_negated_basins.pkl"))
+pickle_data_neg <- pd$read_pickle(paste0(path_file, "ALL2_sign_change_condition_basins_neg.pkl"))
+pickle_data_pos <- pd$read_pickle(paste0(path_file, "ALL2_sign_change_condition_basins.pkl"))
 
 get.basins <- function(sampleIDs, pickle_dat, basin_length_thres_low, basin_length_thres_high, sign_level) {
   
