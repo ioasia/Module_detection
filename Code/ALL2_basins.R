@@ -258,7 +258,7 @@ sample_names <- names(basin_sets)
 n <- length(sample_names)
 
 # Calculate profiles
-basins_profiles <- do.call(rbind, lapply(basins_sets, function(i) {
+basins_profiles <- do.call(rbind, lapply(basin_sets, function(i) {
   
   res <- proteomics_quant[i, ]
   
@@ -301,8 +301,8 @@ all_samples_overlap <- matrix(NA, nrow = n, ncol = n,
 # Step 3: Compute pairwise Jaccard similarities
 for (i in seq_len(n)) {
   for (j in seq_len(n)) {  # Only compute upper triangle (symmetry)
-    set_i <- basins_sets[[i]]
-    set_j <- basins_sets[[j]]
+    set_i <- basin_sets[[i]]
+    set_j <- basin_sets[[j]]
     
     intersection_size <- length(intersect(set_i, set_j))
     union_size <- length(set_i)
@@ -359,7 +359,7 @@ graph_max_cliques <- max_cliques(graph_overlap)
 
 graph_max_dt <- do.call(rbind, lapply(graph_max_cliques, function(i) {
   
-  basin_len <- sapply(basins_sets[names(i)], length)
+  basin_len <- sapply(basin_sets[names(i)], length)
   basin_min <- names(which.min(basin_len))
   data.frame('tokeep' = basin_min, 
              'todiscard' = setdiff(names(basin_len), basin_min))

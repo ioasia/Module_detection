@@ -72,7 +72,7 @@ def basin_finder(G, func): #G: graph in networkx format, func: node function in 
         k += 1
         G_curr = G_curr.subgraph(crit_dict['boundary'])
         print('number of nodes: ',len(G_curr.nodes()))
-        return crit, blocked
+    return crit, blocked
     
 #################### run basin finder for all samples #####################
 
