@@ -1,0 +1,16 @@
+.DS_Store
+Code/.Rhistory
+
+# Generated figures
+Figures/
+
+# Generated output data files
+Data/*.pkl
+Data/*.RDS
+Data/*_igraph_predictions.txt
+Data/*_igraph_predictions_sig.txt
+Data/*_basins_combined.txt
+Data/*_module_median_abund.txt
+Data/*_nmf_scores.txt
+Data/*_membership.txt
+Data/*_blocked*.txt
