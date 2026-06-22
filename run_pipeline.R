@@ -40,7 +40,7 @@ prefix        <- "my_dataset"
 pred_threshold <- "0.8"
 
 # Number of NMF components for the final decomposition.
-# Inspect the cophenetic plot from the first run, then set this to the optimal k.
+# Inspect the _NMF_cophenetic.pdf from the first run, then set this to the optimal k.
 nmf_k         <- "10"
 
 # ============================================================
