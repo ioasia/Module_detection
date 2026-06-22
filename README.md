@@ -72,5 +72,3 @@ Module_detection/
 ├── run_pipeline.sh                  shell wrapper
 └── run_pipeline.R                   R wrapper
 ```
-
-The `Code/` directory also contains the original scripts developed on the ALL cell line dataset (`ALL2_*.R`, `ALL2_run_basin_finder.py`), kept for reference.
