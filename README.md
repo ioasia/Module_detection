@@ -1,6 +1,6 @@
 # Module Detection Pipeline
 
-A pipeline for detecting protein modules from quantitative proteomics data using a basin-of-attraction approach on a co-expression network.
+A pipeline for detecting protein modules from quantitative proteomics data using a basin-of-attraction approach on a protein co-abundance network.
 
 ## What it does
 
