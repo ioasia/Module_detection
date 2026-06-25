@@ -49,35 +49,78 @@ NMF_K="13"
 
 log() { echo "[$(date '+%H:%M:%S')] $*"; }
 
-SKIP_STEP1=false
-SKIP_STEP2=false
+NETWORK="$DATA_DIR/${PREFIX}_igraph_predictions_sig.txt"
+BASINS_POS="$DATA_DIR/${PREFIX}_basins.pkl"
+BASINS_NEG="$DATA_DIR/${PREFIX}_basins_neg.pkl"
+
+# ---- parse --from / --until -------------------------------------------------
+# Pipeline positions:  fdr(1) -> network(2) -> basins(3) -> analysis(4)
+#
+#   --from=basins    skip network reconstruction, start at basin finding
+#   --from=analysis  skip steps 1 and 2, run only the analysis
+#   --until=fdr      stop after FDR diagnostics (before applying threshold)
+#   --until=network  stop after full network construction
+#   --until=basins   stop after basin finding
+
+FROM_POS=1
+UNTIL_POS=4
 for arg in "$@"; do
   case $arg in
-    --skip-step1) SKIP_STEP1=true ;;
-    --skip-step2) SKIP_STEP2=true ;;
-    *) echo "Unknown argument: $arg"; exit 1 ;;
+    --from=basins)    FROM_POS=3 ;;
+    --from=analysis)  FROM_POS=4 ;;
+    --from=*)         echo "Unknown --from value: ${arg#--from=}"; exit 1 ;;
+    --until=fdr)      UNTIL_POS=1 ;;
+    --until=network)  UNTIL_POS=2 ;;
+    --until=basins)   UNTIL_POS=3 ;;
+    --until=*)        echo "Unknown --until value: ${arg#--until=}"; exit 1 ;;
+    *)                echo "Unknown argument: $arg"; exit 1 ;;
   esac
 done
 
+if [ "$FROM_POS" -gt "$UNTIL_POS" ]; then
+  echo "Error: --from is after --until in the pipeline."; exit 1
+fi
+
+if [ "$FROM_POS" -ge 3 ] && [ ! -f "$NETWORK" ]; then
+  echo "Error: network file not found: $NETWORK"
+  echo "Run step 1 first, or check your PREFIX / DATA_DIR settings."; exit 1
+fi
+if [ "$FROM_POS" -ge 4 ]; then
+  if [ ! -f "$BASINS_POS" ]; then
+    echo "Error: basins file not found: $BASINS_POS"
+    echo "Run step 2 first, or check your PREFIX / DATA_DIR settings."; exit 1
+  fi
+  if [ ! -f "$BASINS_NEG" ]; then
+    echo "Error: negated basins file not found: $BASINS_NEG"
+    echo "Run step 2 first, or check your PREFIX / DATA_DIR settings."; exit 1
+  fi
+fi
+
+if [ "$FROM_POS" -le 2 ]; then RUN_STEP1=true; else RUN_STEP1=false; fi
+if [ "$UNTIL_POS" -le 1 ]; then EARLY_STOP=true; else EARLY_STOP=false; fi
+if [ "$FROM_POS" -le 3 ] && [ "$UNTIL_POS" -ge 3 ]; then RUN_STEP2=true; else RUN_STEP2=false; fi
+if [ "$UNTIL_POS" -ge 4 ]; then RUN_STEP3=true; else RUN_STEP3=false; fi
+
 # ---- step 1 -----------------------------------------------------------------
-if [ "$SKIP_STEP1" = false ]; then
+if [ "$RUN_STEP1" = true ]; then
   log "Step 1: Building protein co-expression network..."
+  STEP1_EXTRA=""
+  if [ "$EARLY_STOP" = true ]; then STEP1_EXTRA="--early-stop"; fi
   Rscript --vanilla "$REPO_DIR/Code/network_reconstruction.R" \
     --proteomics="$PROTEOMICS" \
     --corum="$CORUM" \
     --data-dir="$DATA_DIR" \
     --figures-dir="$FIGURES_DIR" \
     --prefix="$PREFIX" \
-    --pred-threshold="$PRED_THRESHOLD"
+    --pred-threshold="$PRED_THRESHOLD" \
+    $STEP1_EXTRA
   log "Step 1 done."
 else
   log "Step 1 skipped."
 fi
 
-NETWORK="$DATA_DIR/${PREFIX}_igraph_predictions_sig.txt"
-
 # ---- step 2 -----------------------------------------------------------------
-if [ "$SKIP_STEP2" = false ]; then
+if [ "$RUN_STEP2" = true ]; then
   log "Step 2a: Finding basins (positive abundances)..."
   python "$REPO_DIR/Code/basin_finder.py" \
     --network="$NETWORK" \
@@ -98,21 +141,22 @@ else
   log "Step 2 skipped."
 fi
 
-BASINS_POS="$DATA_DIR/${PREFIX}_basins.pkl"
-BASINS_NEG="$DATA_DIR/${PREFIX}_basins_neg.pkl"
-
 # ---- step 3 -----------------------------------------------------------------
-log "Step 3: Analysing basins and NMF clustering..."
-Rscript --vanilla "$REPO_DIR/Code/basin_analysis.R" \
-  --proteomics="$PROTEOMICS" \
-  --network="$NETWORK" \
-  --basins-pos="$BASINS_POS" \
-  --basins-neg="$BASINS_NEG" \
-  ${METADATA:+--metadata="$METADATA"} \
-  --data-dir="$DATA_DIR" \
-  --figures-dir="$FIGURES_DIR" \
-  --prefix="$PREFIX" \
-  --nmf-k="$NMF_K"
-log "Step 3 done."
+if [ "$RUN_STEP3" = true ]; then
+  log "Step 3: Analysing basins and NMF clustering..."
+  Rscript --vanilla "$REPO_DIR/Code/basin_analysis.R" \
+    --proteomics="$PROTEOMICS" \
+    --network="$NETWORK" \
+    --basins-pos="$BASINS_POS" \
+    --basins-neg="$BASINS_NEG" \
+    ${METADATA:+--metadata="$METADATA"} \
+    --data-dir="$DATA_DIR" \
+    --figures-dir="$FIGURES_DIR" \
+    --prefix="$PREFIX" \
+    --nmf-k="$NMF_K"
+  log "Step 3 done."
+else
+  log "Step 3 skipped."
+fi
 
 log "Pipeline complete. Figures in $FIGURES_DIR/, tables in $DATA_DIR/."

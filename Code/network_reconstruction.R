@@ -42,11 +42,16 @@ args <- (function() {
     "figures-dir"    = "Figures",
     "prefix"         = "dataset",
     "pred-threshold" = "0.8",
-    "corum"          = ""
+    "corum"          = "",
+    "early-stop"     = FALSE
   )
   for (x in a) {
     m <- regmatches(x, regexec("^--([^=]+)=(.+)$", x))[[1]]
-    if (length(m) == 3) d[[m[2]]] <- m[3]
+    if (length(m) == 3) {
+      d[[m[2]]] <- m[3]
+    } else if (grepl("^--", x)) {
+      d[[sub("^--", "", x)]] <- TRUE
+    }
   }
   d
 })()
@@ -103,6 +108,13 @@ ggsave(file.path(figures_dir, paste0(prefix, '_graph_quality.pdf')), plot = p_ne
 
 write.table(protein_cormat_pred,
             file.path(data_dir, paste0(prefix, '_igraph_predictions.txt')), sep = '\t')
+
+if (isTRUE(args[["early-stop"]])) {
+  message("--early-stop: FDR diagnostics written to ", figures_dir, "/\n",
+          "Inspect ", prefix, "_graph_quality.pdf to choose --pred-threshold,\n",
+          "then re-run without --until=fdr.")
+  quit(save = "no", status = 0)
+}
 
 # ---- apply threshold and extract largest connected component ----------------
 colnames(protein_cormat_pred)[colnames(protein_cormat_pred) %in% c('sim', 'pred')] <-

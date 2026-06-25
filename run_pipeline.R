@@ -54,18 +54,60 @@ run <- function(cmd, args = character()) {
   if (status != 0) stop(sprintf("Command failed (exit %d): %s %s", status, cmd, paste(args, collapse = " ")))
 }
 
-cli_args   <- commandArgs(trailingOnly = TRUE)
-skip_step1 <- "--skip-step1" %in% cli_args
-skip_step2 <- "--skip-step2" %in% cli_args
+# ---- parse --from / --until -------------------------------------------------
+# Pipeline positions:  fdr(1) -> network(2) -> basins(3) -> analysis(4)
+#
+#   --from=basins    skip network reconstruction, start at basin finding
+#   --from=analysis  skip steps 1 and 2, run only the analysis
+#   --until=fdr      stop after FDR diagnostics (before applying threshold)
+#   --until=network  stop after full network construction
+#   --until=basins   stop after basin finding
+
+cli_args  <- commandArgs(trailingOnly = TRUE)
+from_arg  <- NA_character_
+until_arg <- NA_character_
+for (arg in cli_args) {
+  if      (grepl("^--from=",  arg)) from_arg  <- sub("^--from=",  "", arg)
+  else if (grepl("^--until=", arg)) until_arg <- sub("^--until=", "", arg)
+  else stop("Unknown argument: ", arg,
+            "\nValid: --from={basins|analysis}  --until={fdr|network|basins}")
+}
+if (!is.na(from_arg)  && !from_arg  %in% c("basins", "analysis"))
+  stop("--from must be 'basins' or 'analysis'")
+if (!is.na(until_arg) && !until_arg %in% c("fdr", "network", "basins"))
+  stop("--until must be 'fdr', 'network', or 'basins'")
+
+from_pos  <- if (is.na(from_arg))  1L else switch(from_arg,  basins = 3L, analysis = 4L)
+until_pos <- if (is.na(until_arg)) 4L else switch(until_arg, fdr = 1L, network = 2L, basins = 3L)
+
+if (from_pos > until_pos)
+  stop("--from=", from_arg, " is after --until=", until_arg, " in the pipeline")
 
 network    <- file.path(data_dir, paste0(prefix, "_igraph_predictions_sig.txt"))
 basins_pos <- file.path(data_dir, paste0(prefix, "_basins.pkl"))
 basins_neg <- file.path(data_dir, paste0(prefix, "_basins_neg.pkl"))
 
+if (from_pos >= 3L && !file.exists(network))
+  stop("Network file not found: ", network,
+       "\nRun step 1 first, or check your prefix / data-dir settings.")
+if (from_pos >= 4L) {
+  if (!file.exists(basins_pos))
+    stop("Basins file not found: ", basins_pos,
+         "\nRun step 2 first, or check your prefix / data-dir settings.")
+  if (!file.exists(basins_neg))
+    stop("Negated basins file not found: ", basins_neg,
+         "\nRun step 2 first, or check your prefix / data-dir settings.")
+}
+
+run_step1  <- from_pos <= 2L
+early_stop <- until_pos <= 1L
+run_step2  <- from_pos <= 3L && until_pos >= 3L
+run_step3  <- until_pos >= 4L
+
 # ---- step 1 -----------------------------------------------------------------
-if (!skip_step1) {
+if (run_step1) {
   log("Step 1: Building protein co-expression network...")
-  run("Rscript", c(
+  step1_args <- c(
     "--vanilla",
     file.path(repo_dir, "Code", "network_reconstruction.R"),
     paste0("--proteomics=",     proteomics),
@@ -74,14 +116,16 @@ if (!skip_step1) {
     paste0("--figures-dir=",    figures_dir),
     paste0("--prefix=",         prefix),
     paste0("--pred-threshold=", pred_threshold)
-  ))
+  )
+  if (early_stop) step1_args <- c(step1_args, "--early-stop")
+  run("Rscript", step1_args)
   log("Step 1 done.")
 } else {
   log("Step 1 skipped.")
 }
 
 # ---- step 2 -----------------------------------------------------------------
-if (!skip_step2) {
+if (run_step2) {
   log("Step 2a: Finding basins (positive abundances)...")
   run("python", c(
     file.path(repo_dir, "Code", "basin_finder.py"),
@@ -106,22 +150,25 @@ if (!skip_step2) {
 }
 
 # ---- step 3 -----------------------------------------------------------------
-log("Step 3: Analysing basins and NMF clustering...")
-step3_args <- c(
-  "--vanilla",
-  file.path(repo_dir, "Code", "basin_analysis.R"),
-  paste0("--proteomics=",  proteomics),
-  paste0("--network=",     network),
-  paste0("--basins-pos=",  basins_pos),
-  paste0("--basins-neg=",  basins_neg),
-  paste0("--data-dir=",    data_dir),
-  paste0("--figures-dir=", figures_dir),
-  paste0("--prefix=",      prefix),
-  paste0("--nmf-k=",       nmf_k)
-)
-if (!is.null(metadata)) step3_args <- c(step3_args, paste0("--metadata=", metadata))
-
-run("Rscript", step3_args)
-log("Step 3 done.")
+if (run_step3) {
+  log("Step 3: Analysing basins and NMF clustering...")
+  step3_args <- c(
+    "--vanilla",
+    file.path(repo_dir, "Code", "basin_analysis.R"),
+    paste0("--proteomics=",  proteomics),
+    paste0("--network=",     network),
+    paste0("--basins-pos=",  basins_pos),
+    paste0("--basins-neg=",  basins_neg),
+    paste0("--data-dir=",    data_dir),
+    paste0("--figures-dir=", figures_dir),
+    paste0("--prefix=",      prefix),
+    paste0("--nmf-k=",       nmf_k)
+  )
+  if (!is.null(metadata)) step3_args <- c(step3_args, paste0("--metadata=", metadata))
+  run("Rscript", step3_args)
+  log("Step 3 done.")
+} else {
+  log("Step 3 skipped.")
+}
 
 log("Pipeline complete. Figures in ", figures_dir, "/, tables in ", data_dir, "/.")
