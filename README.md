@@ -44,7 +44,7 @@ Both wrappers accept `--from` and `--until` flags to run a subset of the pipelin
 | Flag | Effect |
 |---|---|
 | `--from=basins` | Skip network reconstruction; start at basin finding (requires existing network file) |
-| `--from=analysis` | Skip steps 1 and 2; run only the analysis (requires existing network and basin files) |
+| `--from=analysis` | Skip steps 1 and 2; run only the analysis (requires existing basin files) |
 | `--until=fdr` | Stop after writing FDR/AUC diagnostic plots; do **not** apply the threshold or write the network |
 | `--until=network` | Stop after full network construction |
 | `--until=basins` | Stop after basin finding; skip the analysis |
@@ -54,7 +54,7 @@ The flags can be combined, e.g. `--from=basins --until=basins` runs only the bas
 When using `--from`, the required input files must already exist in `DATA_DIR` with names matching the configured `PREFIX`:
 
 - `--from=basins` needs `{prefix}_igraph_predictions_sig.txt`
-- `--from=analysis` additionally needs `{prefix}_basins.pkl` and `{prefix}_basins_neg.pkl`
+- `--from=analysis` needs only `{prefix}_basins.pkl` and `{prefix}_basins_neg.pkl` (the network is optional — if absent, the degree-vs-modules plot is skipped)
 
 The wrapper will exit with a clear error message if any required file is missing.
 

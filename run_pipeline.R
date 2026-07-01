@@ -7,8 +7,8 @@
 #   2. basin_finder.py (x2)      — find basins of attraction
 #   3. basin_analysis.R          — filter, NMF clustering, figures
 #
-# Pass --skip-step1 and/or --skip-step2 as command-line arguments to reuse
-# previously computed network or basin files.
+# Pass --from={basins|analysis} and/or --until={fdr|network|basins} to run
+# a subset of the pipeline.
 
 repo_dir <- tryCatch(
   normalizePath(dirname(sys.frame(1)$ofile)),
@@ -87,7 +87,7 @@ network    <- file.path(data_dir, paste0(prefix, "_igraph_predictions_sig.txt"))
 basins_pos <- file.path(data_dir, paste0(prefix, "_basins.pkl"))
 basins_neg <- file.path(data_dir, paste0(prefix, "_basins_neg.pkl"))
 
-if (from_pos >= 3L && !file.exists(network))
+if (from_pos == 3L && !file.exists(network))
   stop("Network file not found: ", network,
        "\nRun step 1 first, or check your prefix / data-dir settings.")
 if (from_pos >= 4L) {

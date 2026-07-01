@@ -81,7 +81,7 @@ if [ "$FROM_POS" -gt "$UNTIL_POS" ]; then
   echo "Error: --from is after --until in the pipeline."; exit 1
 fi
 
-if [ "$FROM_POS" -ge 3 ] && [ ! -f "$NETWORK" ]; then
+if [ "$FROM_POS" -eq 3 ] && [ ! -f "$NETWORK" ]; then
   echo "Error: network file not found: $NETWORK"
   echo "Run step 1 first, or check your PREFIX / DATA_DIR settings."; exit 1
 fi
