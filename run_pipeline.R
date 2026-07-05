@@ -14,6 +14,17 @@ repo_dir <- tryCatch(
   normalizePath(dirname(sys.frame(1)$ofile)),
   error = function(e) getwd()
 )
+setwd(repo_dir)
+
+# ---- pinned environments ----------------------------------------------------
+# R packages are pinned via renv (see renv.lock); .Rprofile activates it
+# automatically for any Rscript invocation run with cwd = repo_dir.
+# Python packages are pinned via the .venv/ virtualenv (see requirements.txt).
+if (!file.exists(file.path(repo_dir, "renv", "activate.R")))
+  stop("renv/ not found. Set up the R environment first -- see README.md 'Environment setup'.")
+python_bin <- file.path(repo_dir, ".venv", "bin", "python")
+if (!file.exists(python_bin))
+  stop(python_bin, " not found. Set up the Python environment first -- see README.md 'Environment setup'.")
 
 # ============================================================
 # CONFIG — edit these before running
@@ -108,7 +119,6 @@ run_step3  <- until_pos >= 4L
 if (run_step1) {
   log("Step 1: Building protein co-expression network...")
   step1_args <- c(
-    "--vanilla",
     file.path(repo_dir, "Code", "network_reconstruction.R"),
     paste0("--proteomics=",     proteomics),
     paste0("--corum=",          corum),
@@ -127,7 +137,7 @@ if (run_step1) {
 # ---- step 2 -----------------------------------------------------------------
 if (run_step2) {
   log("Step 2a: Finding basins (positive abundances)...")
-  run("python", c(
+  run(python_bin, c(
     file.path(repo_dir, "Code", "basin_finder.py"),
     paste0("--network=",     network),
     paste0("--proteomics=",  proteomics),
@@ -137,7 +147,7 @@ if (run_step2) {
   ))
 
   log("Step 2b: Finding basins (negated abundances)...")
-  run("python", c(
+  run(python_bin, c(
     file.path(repo_dir, "Code", "basin_finder.py"),
     paste0("--network=",     network),
     paste0("--proteomics=",  proteomics),
@@ -153,7 +163,6 @@ if (run_step2) {
 if (run_step3) {
   log("Step 3: Analysing basins and NMF clustering...")
   step3_args <- c(
-    "--vanilla",
     file.path(repo_dir, "Code", "basin_analysis.R"),
     paste0("--proteomics=",  proteomics),
     paste0("--network=",     network),

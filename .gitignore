@@ -1,6 +1,9 @@
 .DS_Store
 Code/.Rhistory
 
+# Python virtual environment
+.venv/
+
 # Generated figures
 Figures/
 

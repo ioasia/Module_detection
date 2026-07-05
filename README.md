@@ -12,9 +12,31 @@ A pipeline for detecting protein modules from quantitative proteomics data using
 
 ## Dependencies
 
-**R:** `tidyverse`, `igraph`, `Hmisc`, `ComplexHeatmap`, `RcppML`, `caret`, `ROCR`, `reticulate`, `rgexf`, `ggrepel`, `patchwork`, `circlize`, `reshape2`
+**R:** `Biobase`, `data.table`, `Hmisc`, `ggrepel`, `reticulate`, `tidyverse`, `igraph`, `patchwork`, `ComplexHeatmap`, `circlize`, `RcppML`, `rms`, `caret`, `ROCR`, `umap`, `rgexf`, `reshape2`
 
 **Python:** `numpy`, `pandas`, `networkx`, `tqdm`, `pickle` (stdlib)
+
+## Environment setup
+
+Both wrappers pin exact package versions so results are reproducible across machines: R packages via [renv](https://rstudio.github.io/renv/) (`renv.lock`), Python packages via a virtualenv (`requirements.txt`). Both wrappers refuse to run until these are set up.
+
+**R (renv):**
+
+```r
+install.packages("renv")           # if not already installed
+renv::restore()                    # installs the exact package versions from renv.lock
+```
+
+Run this from the repo root (or open the repo as the working directory in R first). `renv::restore()` installs into a project-local library at `renv/library/` — it won't touch your regular R package library. `Biobase` and `ComplexHeatmap` come from Bioconductor; renv resolves this automatically from `renv.lock`. Two of the R dependencies (`Hmisc`, `mvtnorm`, a dependency of `rms`) compile Fortran code, so a Fortran compiler must be available — on macOS, install one with `brew install gcc` (or the [official R toolchain installer](https://mac.r-project.org/tools/)) if `renv::restore()` fails with a "gfortran not found" error.
+
+**Python (venv):**
+
+```bash
+python3 -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+Once both are set up, run the pipeline as usual — `bash run_pipeline.sh` (or `Rscript run_pipeline.R`) automatically activates the renv library and uses `.venv/bin/python` for the Python step.
 
 ## Input data
 
@@ -105,6 +127,11 @@ Module_detection/
 │   └── basin_analysis.R             step 3 — filter, NMF clustering, figures
 ├── Data/                            input and output data files
 ├── Figures/                         output figures
+├── renv/                            renv infrastructure (not committed: renv/library/)
+├── renv.lock                        pinned R package versions
+├── .Rprofile                        activates renv for any R session in this repo
+├── requirements.txt                 pinned Python package versions
+├── .venv/                           Python virtualenv (not committed, created locally)
 ├── run_pipeline.sh                  shell wrapper
 └── run_pipeline.R                   R wrapper
 ```

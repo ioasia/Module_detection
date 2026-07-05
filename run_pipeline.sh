@@ -11,6 +11,21 @@
 
 set -euo pipefail
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cd "$REPO_DIR"
+
+# ---- pinned environments ----------------------------------------------------
+# R packages are pinned via renv (see renv.lock); .Rprofile activates it
+# automatically for any Rscript invocation run with cwd = REPO_DIR.
+# Python packages are pinned via the .venv/ virtualenv (see requirements.txt).
+if [ ! -f "$REPO_DIR/renv/activate.R" ]; then
+  echo "Error: renv/ not found. Set up the R environment first — see README.md 'Environment setup'."
+  exit 1
+fi
+PYTHON="$REPO_DIR/.venv/bin/python"
+if [ ! -x "$PYTHON" ]; then
+  echo "Error: $PYTHON not found. Set up the Python environment first — see README.md 'Environment setup'."
+  exit 1
+fi
 
 # ============================================================
 # CONFIG — edit these before running
@@ -106,7 +121,7 @@ if [ "$RUN_STEP1" = true ]; then
   log "Step 1: Building protein co-expression network..."
   STEP1_EXTRA=""
   if [ "$EARLY_STOP" = true ]; then STEP1_EXTRA="--early-stop"; fi
-  Rscript --vanilla "$REPO_DIR/Code/network_reconstruction.R" \
+  Rscript "$REPO_DIR/Code/network_reconstruction.R" \
     --proteomics="$PROTEOMICS" \
     --corum="$CORUM" \
     --data-dir="$DATA_DIR" \
@@ -122,7 +137,7 @@ fi
 # ---- step 2 -----------------------------------------------------------------
 if [ "$RUN_STEP2" = true ]; then
   log "Step 2a: Finding basins (positive abundances)..."
-  python "$REPO_DIR/Code/basin_finder.py" \
+  "$PYTHON" "$REPO_DIR/Code/basin_finder.py" \
     --network="$NETWORK" \
     --proteomics="$PROTEOMICS" \
     --output-dir="$DATA_DIR" \
@@ -130,7 +145,7 @@ if [ "$RUN_STEP2" = true ]; then
     --no-negate
 
   log "Step 2b: Finding basins (negated abundances)..."
-  python "$REPO_DIR/Code/basin_finder.py" \
+  "$PYTHON" "$REPO_DIR/Code/basin_finder.py" \
     --network="$NETWORK" \
     --proteomics="$PROTEOMICS" \
     --output-dir="$DATA_DIR" \
@@ -144,7 +159,7 @@ fi
 # ---- step 3 -----------------------------------------------------------------
 if [ "$RUN_STEP3" = true ]; then
   log "Step 3: Analysing basins and NMF clustering..."
-  Rscript --vanilla "$REPO_DIR/Code/basin_analysis.R" \
+  Rscript "$REPO_DIR/Code/basin_analysis.R" \
     --proteomics="$PROTEOMICS" \
     --network="$NETWORK" \
     --basins-pos="$BASINS_POS" \
