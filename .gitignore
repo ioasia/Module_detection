@@ -17,3 +17,5 @@ Data/*_module_median_abund.txt
 Data/*_nmf_scores.txt
 Data/*_membership.txt
 Data/*_blocked*.txt
+
+methods_technical_summary.txt
