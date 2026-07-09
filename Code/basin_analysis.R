@@ -104,7 +104,7 @@ get.basins <- function(sampleIDs, pickle_dat, basin_length_thres_low,
                                            basin_length <= basin_length_thres_high]
       basins_filtered <- basins[tokeep]
       basins_filtered <- reshape2::melt(basins_filtered)
-      basins_filtered$index <- i
+      basins_filtered$index <- i - 1  # 0-based, matching basin_finder.py's pass counter (index-0, index-1, ...)
       basins_filtered
     }))
     all_basins$sample <- sampleID
@@ -165,7 +165,7 @@ all_samples_basins_neg <- get.basins(colnames(proteomics_quant), pickle_data_neg
                                      basin_length_thres_low = 2,
                                      basin_length_thres_high = nrow(proteomics_quant),
                                      sign_level = 'negative')
-all_samples_basins_neg <- all_samples_basins_neg[all_samples_basins_neg$index %in% c(1, 2), ]
+all_samples_basins_neg <- all_samples_basins_neg[all_samples_basins_neg$index %in% c(0, 1), ]
 all_samples_basins_neg <- all_samples_basins_neg[all_samples_basins_neg$critical != 'boundary', ]
 
 basins_thres_neg     <- basins.thres(proteomics_quant, 0.95, all_samples_basins_neg, 'negative', 100)
@@ -177,7 +177,7 @@ all_samples_basins_pos <- get.basins(colnames(proteomics_quant), pickle_data_pos
                                      basin_length_thres_low = 2,
                                      basin_length_thres_high = nrow(proteomics_quant),
                                      sign_level = 'positive')
-all_samples_basins_pos <- all_samples_basins_pos[all_samples_basins_pos$index %in% c(1, 2), ]
+all_samples_basins_pos <- all_samples_basins_pos[all_samples_basins_pos$index %in% c(0, 1), ]
 all_samples_basins_pos <- all_samples_basins_pos[all_samples_basins_pos$critical != 'boundary', ]
 
 basins_thres_pos     <- basins.thres(proteomics_quant, 0.95, all_samples_basins_pos, 'positive', 100)
@@ -196,7 +196,7 @@ critical_nodes_sum <- basins_per_sample %>% group_by(sample) %>% summarise(s = s
 
 basins_per_sample$sample <- factor(basins_per_sample$sample,
                                    levels = critical_nodes_sum$sample[order(-critical_nodes_sum$s)])
-basins_per_sample$col    <- factor(paste0(basins_per_sample$index - 1, '_', basins_per_sample$sign),
+basins_per_sample$col    <- factor(paste0(basins_per_sample$index, '_', basins_per_sample$sign),
                                    levels = c("0_positive", "1_positive", "0_negative", "1_negative"))
 basins_per_sample$n_unique_critical[basins_per_sample$sign == 'negative'] <-
   -basins_per_sample$n_unique_critical[basins_per_sample$sign == 'negative']
