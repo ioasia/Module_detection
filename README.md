@@ -31,9 +31,18 @@ Run this from the repo root (or open the repo as the working directory in R firs
 
 **Python (venv):**
 
+Requires **Python 3.11** (pinned in `.python-version`) — `requirements.txt` pins exact package versions (e.g. `numpy==1.24.3`, `pandas==2.0.3`) that only have prebuilt wheels for 3.11; newer interpreters (3.12+) may fail to install them.
+
 ```bash
-python3 -m venv .venv
+python3.11 -m venv .venv
 .venv/bin/pip install -r requirements.txt
+```
+
+If you use [uv](https://github.com/astral-sh/uv) instead, it reads `.python-version` automatically:
+
+```bash
+uv venv .venv
+uv pip install -r requirements.txt
 ```
 
 Once both are set up, run the pipeline as usual — `bash run_pipeline.sh` (or `Rscript run_pipeline.R`) automatically activates the renv library and uses `.venv/bin/python` for the Python step.
