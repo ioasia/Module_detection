@@ -39,7 +39,9 @@
 #   {prefix}_membership.txt
 
 library(reticulate)
-reticulate::py_install("pandas")
+if (!reticulate::py_module_available("pandas")) {
+  reticulate::py_install("pandas")
+}
 library(tidyverse)
 library(data.table)
 library(igraph)
