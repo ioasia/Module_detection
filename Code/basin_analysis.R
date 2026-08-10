@@ -324,8 +324,19 @@ pdf(file.path(figures_dir, paste0(prefix, '_NMF_cophenetic.pdf')), width = 6, he
 plot(p_coph); dev.off()
 
 # ---- NMF decomposition at chosen K ------------------------------------------
-message("Fitting NMF at k = ", K, "...")
-fit_final <- RcppML::nmf(nmf_input_pos, k = K, seed = 1234, verbose = FALSE)
+# NMF optimization is non-convex, so a single run can land in a mediocre local
+# optimum. Run multiple random restarts and keep the one with the lowest
+# reconstruction error, rather than trusting one fixed seed.
+NMF_RESTARTS <- 30
+message("Fitting NMF at k = ", K, " (", NMF_RESTARTS, " restarts, keeping best fit)...")
+nmf_restart_fits <- lapply(seq_len(NMF_RESTARTS), function(i) {
+  RcppML::nmf(nmf_input_pos, k = K, seed = i, verbose = FALSE)
+})
+nmf_restart_errs <- sapply(nmf_restart_fits, function(fit) {
+  recon <- fit$w %*% diag(fit$d) %*% fit$h
+  sqrt(sum((nmf_input_pos - recon)^2))
+})
+fit_final  <- nmf_restart_fits[[which.min(nmf_restart_errs)]]
 H          <- as.data.frame(t(fit_final$h))
 rownames(H) <- colnames(nmf_input_pos)
 h_membership <- as.data.frame(t(apply(H, 1, function(i) i / sum(i))))
