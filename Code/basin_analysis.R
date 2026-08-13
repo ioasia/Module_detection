@@ -286,30 +286,47 @@ nmf_input <- nmf_input[complete.cases(nmf_input), ]
 posneg <- function(x) rbind(pmax(x, 0), pmax(-x, 0))
 nmf_input_pos <- posneg(nmf_input)
 
+# NMF optimization is non-convex, so a single run can land in a mediocre local
+# optimum. Every candidate rank gets NMF_RESTARTS independent runs: the
+# consensus across those runs (how often each sample pair ends up in the same
+# component) decides which K is best, and the single run with the lowest
+# reconstruction error at the chosen K is kept as the reported factorization
+# (same two-job structure as the old NMF package's nrun-restart approach).
+NMF_RESTARTS <- 30
+
 nmf_rds <- file.path(data_dir, paste0(prefix, '_NMF.RDS'))
 if (file.exists(nmf_rds)) {
   message("Loading cached NMF results from ", nmf_rds)
-  coph_cor_dt <- readRDS(nmf_rds)
+  nmf_cache   <- readRDS(nmf_rds)
+  coph_cor_dt <- nmf_cache$coph_cor_dt
+  best_fits   <- nmf_cache$best_fits
 } else {
-  message("Running NMF rank estimation (ranks 2-20, 10 runs each)...")
+  message("Running NMF rank estimation (ranks 2-20, ", NMF_RESTARTS, " runs each)...")
   nmf_ranks <- 2:20
+  best_fits <- list()
   coph_cor_dt <- data.frame(
     k        = nmf_ranks,
     coph_cor = sapply(nmf_ranks, function(k) {
       message("  rank k = ", k)
       n_samp    <- ncol(nmf_input_pos)
       consensus <- matrix(0, n_samp, n_samp)
-      for (i in seq_len(10)) {
+      fits <- vector("list", NMF_RESTARTS)
+      errs <- numeric(NMF_RESTARTS)
+      for (i in seq_len(NMF_RESTARTS)) {
         fit_i <- RcppML::nmf(nmf_input_pos, k = k, seed = i, verbose = FALSE)
         cls   <- apply(fit_i$h, 2, which.max)
         consensus <- consensus + outer(cls, cls, "==") * 1.0
+        fits[[i]] <- fit_i
+        recon    <- fit_i$w %*% diag(fit_i$d) %*% fit_i$h
+        errs[i]  <- sqrt(sum((nmf_input_pos - recon)^2))
       }
-      consensus <- consensus / 10
+      best_fits[[as.character(k)]] <<- fits[[which.min(errs)]]
+      consensus <- consensus / NMF_RESTARTS
       d <- as.dist(1 - consensus)
       cor(d, cophenetic(hclust(d, method = "average")))
     })
   )
-  saveRDS(coph_cor_dt, file = nmf_rds)
+  saveRDS(list(coph_cor_dt = coph_cor_dt, best_fits = best_fits), file = nmf_rds)
 }
 
 p_coph <- ggplot(coph_cor_dt, aes(x = k, y = coph_cor)) +
@@ -324,19 +341,10 @@ pdf(file.path(figures_dir, paste0(prefix, '_NMF_cophenetic.pdf')), width = 6, he
 plot(p_coph); dev.off()
 
 # ---- NMF decomposition at chosen K ------------------------------------------
-# NMF optimization is non-convex, so a single run can land in a mediocre local
-# optimum. Run multiple random restarts and keep the one with the lowest
-# reconstruction error, rather than trusting one fixed seed.
-NMF_RESTARTS <- 30
-message("Fitting NMF at k = ", K, " (", NMF_RESTARTS, " restarts, keeping best fit)...")
-nmf_restart_fits <- lapply(seq_len(NMF_RESTARTS), function(i) {
-  RcppML::nmf(nmf_input_pos, k = K, seed = i, verbose = FALSE)
-})
-nmf_restart_errs <- sapply(nmf_restart_fits, function(fit) {
-  recon <- fit$w %*% diag(fit$d) %*% fit$h
-  sqrt(sum((nmf_input_pos - recon)^2))
-})
-fit_final  <- nmf_restart_fits[[which.min(nmf_restart_errs)]]
+# Reuse the best-of-NMF_RESTARTS fit already computed for k = K during the
+# rank scan above, rather than fitting again from scratch.
+message("Using best-of-", NMF_RESTARTS, " fit from the rank scan at k = ", K, "...")
+fit_final  <- best_fits[[as.character(K)]]
 H          <- as.data.frame(t(fit_final$h))
 rownames(H) <- colnames(nmf_input_pos)
 h_membership <- as.data.frame(t(apply(H, 1, function(i) i / sum(i))))
